@@ -1,34 +1,26 @@
 [default.extend-words]
-# --- From original .codespellrc ---
-ans = "ans"
-als = "als"
-hel = "hel"
-boostrap = "boostrap"
-childs = "childs"
-te = "te"
-vas = "vas"
-hsa = "hsa"
-ment = "ment"
-cann = "cann"
-thi = "thi"
-makro = "makro"
-wil = "wil"
-rouge = "rouge"
-PRIS = "PRIS"
-ather = "ather"
-MIS = "MIS"
-medias = "medias"
-allready = "allready"
-inout = "inout"
-nd = "nd"
-fo = "fo"
-visibles = "visibles"
-nothink = "nothink"
-renderD = "renderD"
-ond = "ond"
-tbe = "tbe"
+# --- Inherited from .codespellrc ---
+ans = "ans"             # variable name (answer) in benchmark code
+als = "als"             # German word in multilingual eval test data
+hel = "hel"             # test string in router tree tests
+te = "te"               # Telugu language code (ISO 639-1) in eval datasets
+vas = "vas"             # AVX-512 variable name in CPU moe kernel
+ment = "ment"           # substring in test data (tokenization test)
+thi = "thi"             # test string in reasoning parser tests
+ather = "ather"         # test string in function call parser tests
+medias = "medias"       # variable name in multimodal code
+nd = "nd"               # PyTorch einsum notation "...nd"
+fo = "fo"               # FoCa method name (Forecast then Calibrate)
+visibles = "visibles"   # variable name in whisper adapter test
+nothink = "nothink"     # template tag /nothink
+MIS = "MIS"             # MIS scoring mode in sequence classification
+PRIS = "PRIS"           # AIBRIX KV cache backend name
+hsa = "hsa"             # HSA (Heterogeneous System Architecture) for AMD ROCm
+cann = "cann"           # CANN (Compute Architecture for Neural Networks) for Ascend NPU
+rouge = "rouge"         # ROUGE metric name (rouge-score package)
+tbe = "tbe"             # TBE (Tensor Boost Engine) for Ascend NPU
 
-# --- Variable names / abbreviations ---
+# --- Code variable names ---
 thw = "thw"             # HuggingFace Qwen2-VL (temporal, height, width)
 ue = "ue"               # code variable
 UE = "UE"               # code variable
@@ -59,6 +51,7 @@ Eles = "Eles"           # CUDA macro (kRmemEles)
 eles = "eles"           # CUDA variable (eles_per_thr)
 Optin = "Optin"         # CUDA constant (cudaDevAttrMaxSharedMemoryPerBlockOptin)
 muh = "muh"             # file extension (.muh = Musa Header)
+countr = "countr"       # C++ std::countr_zero (C++20)
 
 # --- Module / class / function names ---
 cmo = "cmo"             # Cache Management Operation module
@@ -69,6 +62,10 @@ Cachable = "Cachable"   # class name CachableDiT
 Convnet = "Convnet"     # class name
 Chello = "Chello"       # test string
 NOO = "NOO"             # from NOOPs
+OME = "OME"             # project name (Kubernetes operator)
+wrk = "wrk"             # benchmarking tool name
+ist = "ist"             # test data / German text
+sur = "sur"             # French word ("on")
 
 # --- Env vars / config keys (API surface, breaking to rename) ---
 PROCESSER = "PROCESSER" # env var SGLANG_ENABLE_LOGITS_PROCESSER_CHUNK
@@ -77,11 +74,6 @@ INBALANCE = "INBALANCE" # env var SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK
 ENBLE = "ENBLE"         # env var SGLANG_ENBLE_TORCH_COMILE
 COMILE = "COMILE"       # env var SGLANG_ENBLE_TORCH_COMILE
 rounter = "rounter"     # config param rounter_params_dtype (matches upstream Longcat)
-countr = "countr"       # C++ std::countr_zero (C++20)
-OME = "OME"             # project name (Kubernetes operator)
-wrk = "wrk"             # benchmarking tool name
-ist = "ist"             # test data / German text
-sur = "sur"             # French word ("on")
 
 [files]
 extend-exclude = ["*.json", "*.jsonl", "*.patch", "*.txt", "*.lock", "python/sglang/multimodal_gen/third_party/**"]
