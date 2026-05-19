@@ -21,6 +21,16 @@ nin_shortcut = "nin_shortcut"           # model architecture term
 stride_bse = "stride_bse"              # variable name
 local_pref_numer = "local_pref_numer"    # variable name (numerator)
 _LOCAL_PREF_NUMER = "_LOCAL_PREF_NUMER"  # constant (numerator)
+meshVerticeInpaint = "meshVerticeInpaint"         # public API function
+meshVerticeInpaint_smooth = "meshVerticeInpaint_smooth"  # public API function
+CachableDiT = "CachableDiT"            # class name
+Convnet = "Convnet"                    # class name
+layrnorm = "layrnorm"                 # transformers weight name
+pre_layrnorm = "pre_layrnorm"         # transformers weight name
+SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK = "SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK"  # env var
+SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK = "SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK"    # env var
+SGL_DISABLE_TP_MEMORY_INBALANCE_CHECK = "SGL_DISABLE_TP_MEMORY_INBALANCE_CHECK"        # env var
+rounter_params_dtype = "rounter_params_dtype"  # config param (matches upstream Longcat)
 
 [default.extend-words]
 # --- Code variable names ---
@@ -70,17 +80,9 @@ tbe = "tbe"             # TBE (Tensor Boost Engine) for Ascend NPU
 cmo = "cmo"             # Cache Management Operation module
 CMO = "CMO"             # Cache Management Operation module
 DBE = "DBE"             # third-party pynvml
-Vertice = "Vertice"     # function name meshVerticeInpaint (public API)
-Cachable = "Cachable"   # class name CachableDiT
-Convnet = "Convnet"     # class name
 NOO = "NOO"             # from NOOPs
 OME = "OME"             # project name (Kubernetes operator)
 wrk = "wrk"             # benchmarking tool name
 MIS = "MIS"             # MIS scoring mode in sequence classification
 PRIS = "PRIS"           # AIBRIX KV cache backend name
 rouge = "rouge"         # ROUGE metric name (rouge-score package)
-
-# --- Env vars / config keys (API surface, breaking to rename) ---
-layrnorm = "layrnorm"   # intentionally matches transformers weight names
-INBALANCE = "INBALANCE" # env var SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK
-rounter = "rounter"     # config param rounter_params_dtype (matches upstream Longcat)
