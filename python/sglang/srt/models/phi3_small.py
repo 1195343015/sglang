@@ -120,7 +120,9 @@ class Phi3SmallSelfAttention(nn.Module):
         self.num_q_per_kv = self.num_heads // self.num_key_value_heads
         if self.tp_size > 1:
             assert self.num_key_value_heads % self.tp_size == 0
-        self.num_kv_heads_per_partition = max(1, self.num_key_value_heads // self.tp_size)
+        self.num_kv_heads_per_partition = max(
+            1, self.num_key_value_heads // self.tp_size
+        )
         self.num_heads_per_partition = self.num_heads // self.tp_size
 
         self.max_position_embeddings = config.max_position_embeddings

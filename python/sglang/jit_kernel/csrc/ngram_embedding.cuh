@@ -17,16 +17,16 @@ __global__ void ComputeNGramIdsKernel(
     int batch_size,
     int ne_n,
     int ne_k,
-    int* ne_weights,                      // [ne_n-1,ne_k,ne_n]
-    int* ne_mods,                         // [ne_n-1,ne_k]
+    int* ne_weights,                       // [ne_n-1,ne_k,ne_n]
+    int* ne_mods,                          // [ne_n-1,ne_k]
     int* exclusive_ne_embedder_size_sums,  // [(ne_n-1)*ne_k]
-    int* tokens,                          // [token_num]
-    int* exclusive_req_len_sums,          // [batch_size+1]
-    int* ne_token_table,                  // [max_running_reqs, max_context_len]
-    int max_context_len,                  // max_context_len
-    long* row_indices,                    // [batch_size]
-    int* column_starts,                   // [batch_size]
-    int* n_gram_ids                       // [ne_n-1,ne_k,token_num]
+    int* tokens,                           // [token_num]
+    int* exclusive_req_len_sums,           // [batch_size+1]
+    int* ne_token_table,                   // [max_running_reqs, max_context_len]
+    int max_context_len,                   // max_context_len
+    long* row_indices,                     // [batch_size]
+    int* column_starts,                    // [batch_size]
+    int* n_gram_ids                        // [ne_n-1,ne_k,token_num]
 ) {
   // Determine which n, k, and request this block handles.
   /**

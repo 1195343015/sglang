@@ -169,7 +169,9 @@ class AscendTorchNativeAttnBackend:
                     .squeeze(0)
                     .movedim(query.dim() - 2, 0)
                 )
-            output[start_q:end_q, :, :] = per_req_out_redundant[prefill_seq_len_q:, :, :]
+            output[start_q:end_q, :, :] = per_req_out_redundant[
+                prefill_seq_len_q:, :, :
+            ]
             start_q, start_kv = end_q, end_kv
         return output
 

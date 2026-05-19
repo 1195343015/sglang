@@ -409,7 +409,7 @@ void verify_tree_greedy(
 void reconstruct_indices_from_tree_mask(
     at::Tensor tree_mask,
     at::Tensor verified_seq_len,
-    at::Tensor positions,             // mutable
+    at::Tensor positions,              // mutable
     at::Tensor retrieve_index,         // mutable
     at::Tensor retrieve_next_token,    // mutable
     at::Tensor retrieve_next_sibling,  // mutable
