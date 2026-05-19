@@ -489,7 +489,7 @@ class TestParseRouterArgs:
         args_b = [
             "--service-discovery",
             "--selector",
-            # OME has this style
+            # SOME has this style
             "app=worker env=prod",
             "--service-discovery-port",
             "8080",

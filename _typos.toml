@@ -1,0 +1,87 @@
+[default.extend-words]
+# --- From original .codespellrc ---
+ans = "ans"
+als = "als"
+hel = "hel"
+boostrap = "boostrap"
+childs = "childs"
+te = "te"
+vas = "vas"
+hsa = "hsa"
+ment = "ment"
+cann = "cann"
+thi = "thi"
+makro = "makro"
+wil = "wil"
+rouge = "rouge"
+PRIS = "PRIS"
+ather = "ather"
+MIS = "MIS"
+medias = "medias"
+allready = "allready"
+inout = "inout"
+nd = "nd"
+fo = "fo"
+visibles = "visibles"
+nothink = "nothink"
+renderD = "renderD"
+ond = "ond"
+tbe = "tbe"
+
+# --- Variable names / abbreviations ---
+thw = "thw"             # HuggingFace Qwen2-VL (temporal, height, width)
+ue = "ue"               # code variable
+UE = "UE"               # code variable
+ba = "ba"               # Qwen3 variable
+BA = "BA"               # Qwen3 variable
+thr = "thr"             # CUDA variable (elements_per_thr)
+Thr = "Thr"             # CUDA variable
+arange = "arange"       # torch.arange / np.arange
+indx = "indx"           # variable abbreviation (index)
+Indx = "Indx"           # variable abbreviation
+iy = "iy"               # variable name
+PN = "PN"               # abbreviation
+bse = "bse"             # variable name
+numer = "numer"         # variable name (numerator)
+nin = "nin"             # variable name (nin_shortcut)
+dout = "dout"           # variable name (gradient output)
+activ = "activ"         # variable name (activation pointer)
+tpos = "tpos"           # variable name (temporal position)
+padd = "padd"           # variable name (padded)
+splitted = "splitted"   # valid English (though informal)
+
+# --- CUDA / CUTLASS / hardware terms ---
+setp = "setp"           # PTX assembly instruction setp.ne.b32
+subtile = "subtile"     # CUTLASS term (epilogue_subtile)
+CPY = "CPY"             # CUTLASS template parameter
+Ot = "Ot"               # CUTLASS tensor variable (tOtO)
+Eles = "Eles"           # CUDA macro (kRmemEles)
+eles = "eles"           # CUDA variable (eles_per_thr)
+Optin = "Optin"         # CUDA constant (cudaDevAttrMaxSharedMemoryPerBlockOptin)
+muh = "muh"             # file extension (.muh = Musa Header)
+
+# --- Module / class / function names ---
+cmo = "cmo"             # Cache Management Operation module
+CMO = "CMO"             # Cache Management Operation module
+DBE = "DBE"             # third-party pynvml
+Vertice = "Vertice"     # function name meshVerticeInpaint (public API)
+Cachable = "Cachable"   # class name CachableDiT
+Convnet = "Convnet"     # class name
+Chello = "Chello"       # test string
+NOO = "NOO"             # from NOOPs
+
+# --- Env vars / config keys (API surface, breaking to rename) ---
+PROCESSER = "PROCESSER" # env var SGLANG_ENABLE_LOGITS_PROCESSER_CHUNK
+layrnorm = "layrnorm"   # intentionally matches transformers weight names
+INBALANCE = "INBALANCE" # env var SGLANG_DISABLE_TP_MEMORY_INBALANCE_CHECK
+ENBLE = "ENBLE"         # env var SGLANG_ENBLE_TORCH_COMILE
+COMILE = "COMILE"       # env var SGLANG_ENBLE_TORCH_COMILE
+rounter = "rounter"     # config param rounter_params_dtype (matches upstream Longcat)
+countr = "countr"       # C++ std::countr_zero (C++20)
+OME = "OME"             # project name (Kubernetes operator)
+wrk = "wrk"             # benchmarking tool name
+ist = "ist"             # test data / German text
+sur = "sur"             # French word ("on")
+
+[files]
+extend-exclude = ["*.json", "*.jsonl", "*.patch", "*.txt", "*.lock", "python/sglang/multimodal_gen/third_party/**"]

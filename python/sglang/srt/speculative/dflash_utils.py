@@ -619,10 +619,10 @@ def compute_dflash_sampling_correct_drafts_and_bonus(
         accept_index=accept_index,
         accept_token_num=accept_token_num,
         candidates=candidates_i64,
-        # kwarg LHS retained as `retrive_*` to match sgl_kernel op schema.
-        retrive_index=retrieve_index,
-        retrive_next_token=retrieve_next_token,
-        retrive_next_sibling=retrieve_next_sibling,
+        # kwarg LHS retained as `retrieve_*` to match sgl_kernel op schema.
+        retrieve_index=retrieve_index,
+        retrieve_next_token=retrieve_next_token,
+        retrieve_next_sibling=retrieve_next_sibling,
         uniform_samples=uniform_samples,
         uniform_samples_for_final_sampling=uniform_samples_for_final_sampling,
         target_probs=target_probs,
