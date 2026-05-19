@@ -1,5 +1,9 @@
 [files]
+ignore-hidden = false
 extend-exclude = [
+    ".git/**",
+    ".github/CODEOWNERS",
+    ".github/MAINTAINER.md",
     "*.json",
     "*.jsonl",
     "*.txt",
