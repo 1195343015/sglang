@@ -2590,6 +2590,9 @@ export const Playground = ({ config }) => {
   const [envDraft, setEnvDraft] = useState(env);
   useEffect(() => { if (modal === "env") setEnvDraft(env); }, [modal, env]);
   const [runMode, setRunMode] = useState("python");
+  const runModes = (typeof config.runModes === "function"
+    ? config.runModes(base) : config.runModes) || ["python", "docker"];
+  const activeRunMode = runModes.includes(runMode) ? runMode : runModes[0];
 
   // Submit-verified-cell modal state, reset each time the modal opens.
   const [submitDraft, setSubmitDraft] = useState({
@@ -2720,11 +2723,11 @@ export const Playground = ({ config }) => {
     return out;
   };
   if (baseCell) {
-    baseCommand = renderCommandLines(baseCell, withRatio(baseCell.flags, pgRatios.base), baseCell.env, base, env, null, runMode);
+    baseCommand = renderCommandLines(baseCell, withRatio(baseCell.flags, pgRatios.base), baseCell.env, base, env, null, activeRunMode);
     const { flags: pgFlags, env: pgEnv, pdMode } = applyAllDeltas(baseCell.flags, baseCell.env, deltas, base, derivedMap);
     pgFlagsLatest = pgFlags;
     pgEnvLatest = pgEnv;
-    playgroundCommand = renderCommandLines(baseCell, withRatio(pgFlags, pgRatios.eff), pgEnv, base, env, pdMode, runMode);
+    playgroundCommand = renderCommandLines(baseCell, withRatio(pgFlags, pgRatios.eff), pgEnv, base, env, pdMode, activeRunMode);
     diffLines = computeDiff(baseCommand, playgroundCommand);
   }
   // Broadcast both configs for outside consumers (the mamba ratio calculator):
@@ -3026,22 +3029,19 @@ export const Playground = ({ config }) => {
                 </span>
               )}
               <div style={s.runModeWrap} role="tablist" aria-label="Output format">
-                <span
-                  style={s.runModeChip(runMode === "python")}
-                  onClick={() => setRunMode("python")}
-                  role="tab"
-                  aria-selected={runMode === "python"}
-                >
-                  Python
-                </span>
-                <span
-                  style={s.runModeChipLast(runMode === "docker")}
-                  onClick={() => setRunMode("docker")}
-                  role="tab"
-                  aria-selected={runMode === "docker"}
-                >
-                  Docker
-                </span>
+                {runModes.map((mode, index) => (
+                  <span
+                    key={mode}
+                    style={index === runModes.length - 1
+                      ? s.runModeChipLast(activeRunMode === mode)
+                      : s.runModeChip(activeRunMode === mode)}
+                    onClick={() => setRunMode(mode)}
+                    role="tab"
+                    aria-selected={activeRunMode === mode}
+                  >
+                    {mode === "python" ? "Python" : "Docker"}
+                  </span>
+                ))}
               </div>
             </div>
             <div style={s.iconRow}>

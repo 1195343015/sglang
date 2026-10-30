@@ -1,6 +1,6 @@
 ---
 title: Qwen3.8-Flash-Next
-description: "Deploy Qwen3.8-Flash-Next with SGLang — day-0 recipes for Qwen's 176B-parameter (6B active) GDN + QSA hybrid Mixture-of-Experts preview of the Qwen4 architecture, on NVIDIA and AMD."
+description: "Deploy Qwen3.8-Flash-Next with SGLang — day-0 recipes for Qwen's 176B-parameter (6B active) GDN + QSA hybrid Mixture-of-Experts preview of the Qwen4 architecture, on NVIDIA, AMD and T-HEAD 810E."
 tag: NEW
 ---
 
@@ -10,13 +10,55 @@ tag: NEW
 
 <Accordion title="Install SGLang">
 
-Use an SGLang build that includes Qwen3.8-Flash-Next support (v0.5.22 or later).
+<Tabs>
+
+<Tab title="NVIDIA">
+
+For NVIDIA, use an SGLang build that includes Qwen3.8-Flash-Next support (v0.5.22 or later).
 
 ```bash Command
 docker pull lmsysorg/sglang:latest
 ```
 
 The deployment panel can render a complete `docker run` command for the selected hardware and options. See [Install SGLang with Docker](/docs/get-started/install#method-3-using-docker) for host setup.
+
+</Tab>
+
+<Tab title="AMD">
+
+Use the ROCm image configured for the MI350X and MI355X recipes on this page:
+
+```bash Command
+docker pull lmsysorg/sglang-rocm:qwen38flashnext
+```
+
+See the [AMD installation guide](/docs/hardware-platforms/amd_gpu) for host setup, then select your hardware below to generate the Docker launch command.
+
+</Tab>
+
+<Tab title="T-HEAD PPU">
+
+Follow the [T-HEAD SAIL installation guide](/docs/hardware-platforms/sail). Start with the SAIL driver, PPU SDK, and SAIL-enabled PyTorch installed; do not use the NVIDIA Docker image.
+
+```bash Command
+export PPU_SDK=/usr/local/PPU_SDK  # Replace with your SDK installation path.
+python3 -c 'import torch; print(torch.cuda.get_device_name())'
+
+git clone https://github.com/sgl-project/sglang.git
+cd sglang
+
+python3 -m pip install --upgrade pip wheel
+cp python/pyproject_other.toml python/pyproject.toml
+python3 -m pip install -e "python[all_sail]" --no-build-isolation
+python3 -m pip install sailify==1.0.0
+
+cd python/sglang/kernels/aot
+python3 setup_sail.py install
+```
+
+</Tab>
+
+</Tabs>
 
 </Accordion>
 
@@ -137,6 +179,11 @@ Each precision is its own repository:
       <td style={{padding: "9px 12px"}}><a href="https://huggingface.co/nvidia/Qwen3.8-Flash-Next-NVFP4">nvidia/Qwen3.8-Flash-Next-NVFP4</a> (ModelOpt MIXED_PRECISION)</td>
       <td style={{padding: "9px 12px"}}>RTX PRO 6000, 1x or 2x DGX Spark (needs <a href="https://github.com/sgl-project/sglang/pull/38121">#38121</a>: the <code>dev-qwen38-next-local</code> image or the Python install path)</td>
     </tr>
+    <tr>
+      <td style={{padding: "9px 12px"}}><strong>INT8 (T-HEAD)</strong></td>
+      <td style={{padding: "9px 12px"}}><a href="https://modelscope.cn/models/T-HEAD/Qwen3.8-Flash-Next-MoE-Quant-W-INT8-PerChannel-A-INT8-PerToken">T-HEAD/Qwen3.8-Flash-Next-MoE-Quant-W-INT8-PerChannel-A-INT8-PerToken</a></td>
+      <td style={{padding: "9px 12px"}}>4x T-HEAD 810E (96 GB), TP4 + DP4</td>
+    </tr>
   </tbody>
 </table>
 
@@ -182,7 +229,7 @@ Pending update — a sample transcript will be added here once the weights are p
 
 ### 2.2 Tool Calling
 
-Add `--tool-call-parser auto` (toggle **Tool Call Parser** in the **Parsers** card of the [Playground above](#playground)) to surface structured tool calls via `message.tool_calls`. As with the reasoning parser, SGLang resolves the concrete detector from the chat template at startup. No Deploy cell sets it, so this is an opt-in: add the flag to the generated command, or flip the chip in the Playground.
+Add `--tool-call-parser auto` (toggle **Tool Call Parser** in the **Parsers** card of the [Playground above](#playground)) to surface structured tool calls via `message.tool_calls`. As with the reasoning parser, SGLang resolves the concrete detector from the chat template at startup. The 810E recipe already pins `--reasoning-parser qwen3` and `--tool-call-parser qwen3_coder`; other recipes leave tool calling opt-in.
 
 Because this model always thinks, the final assistant turn can put text in `reasoning_content` rather than `content` — print both so a bare `None` doesn't mislead you.
 
