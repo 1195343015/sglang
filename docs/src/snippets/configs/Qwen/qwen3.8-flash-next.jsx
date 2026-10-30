@@ -27,14 +27,17 @@
 export const config = {
   modelName: "Qwen3.8-Flash-Next",
 
-  supportedHardware: ["h200", "b200", "b300", "gb300", "rtx6000", "dgx-spark", "mi350x", "mi355x"],
+  supportedHardware: ["h200", "b200", "b300", "gb300", "rtx6000", "dgx-spark", "mi350x", "mi355x", "ppu810e"],
 
   // RTX PRO 6000 (SM120, Blackwell workstation) is not in the shared
   // HARDWARE_CATALOG, so it carries a local vendor override here (same id and
   // label as the Qwen3.8-27B page).
   hardware: [
     { id: "rtx6000", label: "RTX PRO 6000", vram: "96GB", vendor: "blackwell" },
+    { id: "ppu810e", label: "810E", vram: "96GB", vendor: "ppu" },
   ],
+
+  runModes: (sel) => sel.hw === "ppu810e" ? ["python"] : ["python", "docker"],
 
   variants: [
     { id: "default", label: "Default" },
@@ -51,6 +54,7 @@ export const config = {
     { id: "fp8",        label: "FP8"          },
     { id: "nvfp4",      label: "NVFP4 (RDXA)" },
     { id: "nvfp4-nvda", label: "NVFP4 (NVDA)" },
+    { id: "t-head-int8", label: "INT8 (T-HEAD)" },
   ],
   // BF16, FP8 and NVFP4 each ship two operating points, low latency adding the
   // in-checkpoint MTP head (NEXTN 3/1/4) on top of the high-throughput shape.
@@ -95,7 +99,8 @@ export const config = {
       // of weights plus the pools to fit, so Auto and Off are greyed out and On
       // is the only pick — the forced chip appends --ple-offload-embedding, so
       // the cells do not list it themselves.
-      showWhen: (sel) => !["mi350x", "mi355x"].includes(sel.hw),
+      // The 810E recipe pins PLE offload on.
+      showWhen: (sel) => !["mi350x", "mi355x", "ppu810e"].includes(sel.hw),
       default: "auto",
       options: [
         { id: "auto", label: "Auto",
@@ -146,6 +151,7 @@ export const config = {
     "default|fp8":   "Qwen/Qwen3.8-Flash-Next-FP8",
     "default|nvfp4": "RadixArk/Qwen3.8-Flash-Next-NVFP4",
     "default|nvfp4-nvda": "nvidia/Qwen3.8-Flash-Next-NVFP4",
+    "default|t-head-int8": "T-HEAD/Qwen3.8-Flash-Next-MoE-Quant-W-INT8-PerChannel-A-INT8-PerToken",
   },
 
   placeholders: {
@@ -221,11 +227,10 @@ export const config = {
   playgroundFeatures: {
 
     // ----- Card: "Attention Parallelism" -----
-    // TP only. Every cell on the page is single-node TP (4 for BF16/FP8, 1 for
-    // NVFP4, 8 on AMD) with no DP-attention anywhere, and the values stop at 8
-    // because that is the widest single host here. CP and DP-Attention are left
-    // out until there's a validated shape for them on this checkpoint.
+    // TP knobs for the GPU recipes; the PPU recipe keeps TP4/DP4 fixed.
     attention: {
+      // Keep the 810E TP4/DP4 shape together.
+      showWhen: (base) => base.hw !== "ppu810e",
       knobs: [
         { id: "tp", label: "TP", values: [null, 1, 2, 4, 8] },
       ],
@@ -235,10 +240,11 @@ export const config = {
     // EP degree only: the ultra-sparse MoE spreads its expert pool across ranks,
     // and the BF16/FP8 high-throughput cells already pair TP4 with EP4 (the TP1
     // NVFP4 cells have only one rank, so EP stays 1 there). No a2a/runner
-    // backend row — the cells leave `--moe-a2a-backend` and
+    // backend row — the GPU cells leave `--moe-a2a-backend` and
     // `--moe-runner-backend` unset so the runner resolves from the checkpoint's
     // own quant_method, and no alternative backend is validated here yet.
     moe: {
+      showWhen: (base) => base.hw !== "ppu810e",
       ep: { label: "EP", values: [null, 1, 2, 4, 8] },
     },
 
@@ -251,6 +257,8 @@ export const config = {
     // makes that chip an opt-OUT: the handler derives it as already-on and
     // strips the flag when toggled off. The tool-call chip is an opt-IN.
     parsers: {
+      // The PPU recipe uses explicit parser names for fork compatibility.
+      showWhen: (base) => base.hw !== "ppu810e",
       items: [
         { id: "reasoning", label: "Reasoning Parser", flag: "--reasoning-parser auto" },
         { id: "toolCall",  label: "Tool Call Parser", flag: "--tool-call-parser auto" },
@@ -1482,6 +1490,42 @@ export const config = {
         "--mem-fraction-static 0.9",
         "--model-loader-extra-config '{\"enable_multithread_load\": true}'",
         "--trust-remote-code",
+        "--host {{HOST_IP}}",
+        "--port {{PORT}}",
+      ],
+    },
+    // Imported from InferPlanner: single-node TP4/DP4, L1, NEXTN 3/1/4.
+    {
+      match: { hw: "ppu810e", variant: "default", quant: "t-head-int8", strategy: "balanced", nodes: "single" },
+      verified: true,
+      env: [
+        "SGLANG_SKIP_SGL_KERNEL_VERSION_CHECK=1",
+        "SGLANG_USE_MODELSCOPE=1",
+      ],
+      flags: [
+        "--model-path {{MODEL_NAME}}",
+        "--tp 4",
+        "--dp-size 4",
+        "--max-running-requests 128",
+        "--moe-a2a-backend deepep",
+        "--enable-dp-attention",
+        "--enable-dp-lm-head",
+        "--moe-dense-tp-size 1",
+        "--mem-fraction-static 0.9",
+        "--chunked-prefill-size 8192",
+        "--linear-attn-prefill-backend triton",
+        "--linear-attn-decode-backend triton",
+        "--linear-attn-verify-backend triton",
+        "--mamba-ssm-dtype bfloat16",
+        "--quantization w8a8_int8",
+        "--reasoning-parser qwen3",
+        "--ple-offload-embedding",
+        "--speculative-algorithm NEXTN",
+        "--speculative-num-steps 3",
+        "--speculative-eagle-topk 1",
+        "--speculative-num-draft-tokens 4",
+        "--trust-remote-code",
+        "--tool-call-parser qwen3_coder",
         "--host {{HOST_IP}}",
         "--port {{PORT}}",
       ],

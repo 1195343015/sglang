@@ -1,6 +1,6 @@
 ---
 title: Qwen3.8-Flash-Next
-description: "Deploy Qwen3.8-Flash-Next with SGLang — day-0 recipes for Qwen's 176B-parameter (6B active) GDN + QSA hybrid Mixture-of-Experts preview of the Qwen4 architecture, on NVIDIA and AMD."
+description: "Deploy Qwen3.8-Flash-Next with SGLang — day-0 recipes for Qwen's 176B-parameter (6B active) GDN + QSA hybrid Mixture-of-Experts preview of the Qwen4 architecture, on NVIDIA, AMD and T-HEAD 810E."
 tag: NEW
 ---
 
@@ -10,13 +10,15 @@ tag: NEW
 
 <Accordion title="Install SGLang">
 
-Use an SGLang build that includes Qwen3.8-Flash-Next support (v0.5.22 or later).
+For NVIDIA, use an SGLang build that includes Qwen3.8-Flash-Next support (v0.5.22 or later).
 
 ```bash Command
 docker pull lmsysorg/sglang:latest
 ```
 
 The deployment panel can render a complete `docker run` command for the selected hardware and options. See [Install SGLang with Docker](/docs/get-started/install#method-3-using-docker) for host setup.
+
+For **T-HEAD 810E**, use a PPU-enabled SGLang runtime with W8A8 INT8 and DeepEP support, rather than the NVIDIA image above. The 810E recipe uses four 96 GB cards on one node (TP4 + DP4), NEXTN 3/1/4 and PLE embedding offload. Select **810E / INT8 (T-HEAD) / Balanced**; only Python output is available. `SGLANG_USE_MODELSCOPE=1` downloads the checkpoint from ModelScope.
 
 </Accordion>
 
@@ -137,6 +139,11 @@ Each precision is its own repository:
       <td style={{padding: "9px 12px"}}><a href="https://huggingface.co/nvidia/Qwen3.8-Flash-Next-NVFP4">nvidia/Qwen3.8-Flash-Next-NVFP4</a> (ModelOpt MIXED_PRECISION)</td>
       <td style={{padding: "9px 12px"}}>RTX PRO 6000, 1x or 2x DGX Spark (needs <a href="https://github.com/sgl-project/sglang/pull/38121">#38121</a>: the <code>dev-qwen38-next-local</code> image or the Python install path)</td>
     </tr>
+    <tr>
+      <td style={{padding: "9px 12px"}}><strong>INT8 (T-HEAD)</strong></td>
+      <td style={{padding: "9px 12px"}}><a href="https://modelscope.cn/models/T-HEAD/Qwen3.8-Flash-Next-MoE-Quant-W-INT8-PerChannel-A-INT8-PerToken">T-HEAD/Qwen3.8-Flash-Next-MoE-Quant-W-INT8-PerChannel-A-INT8-PerToken</a></td>
+      <td style={{padding: "9px 12px"}}>4x T-HEAD 810E (96 GB), TP4 + DP4</td>
+    </tr>
   </tbody>
 </table>
 
@@ -182,7 +189,7 @@ Pending update — a sample transcript will be added here once the weights are p
 
 ### 2.2 Tool Calling
 
-Add `--tool-call-parser auto` (toggle **Tool Call Parser** in the **Parsers** card of the [Playground above](#playground)) to surface structured tool calls via `message.tool_calls`. As with the reasoning parser, SGLang resolves the concrete detector from the chat template at startup. No Deploy cell sets it, so this is an opt-in: add the flag to the generated command, or flip the chip in the Playground.
+Add `--tool-call-parser auto` (toggle **Tool Call Parser** in the **Parsers** card of the [Playground above](#playground)) to surface structured tool calls via `message.tool_calls`. As with the reasoning parser, SGLang resolves the concrete detector from the chat template at startup. The 810E recipe already pins `--reasoning-parser qwen3` and `--tool-call-parser qwen3_coder`; other recipes leave tool calling opt-in.
 
 Because this model always thinks, the final assistant turn can put text in `reasoning_content` rather than `content` — print both so a bare `None` doesn't mislead you.
 
