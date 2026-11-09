@@ -11,8 +11,8 @@ from unittest.mock import ANY, Mock, patch
 
 import pytest
 
+from sglang.srt.arg_groups.model_override_base import resolving_view
 from sglang.srt.arg_groups.model_path_hook import handle_model_source_paths
-from sglang.srt.arg_groups.overrides import resolving_view
 from sglang.srt.model_hub import parse_model_hub_reference, resolve_model_hub_paths
 from sglang.srt.server_args import ServerArgs
 from sglang.test.ci.ci_register import register_cpu_ci
