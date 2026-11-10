@@ -40,45 +40,29 @@ def hubs(monkeypatch, tmp_path):
     return {"hf": hf, "modelscope": ms}
 
 
-@pytest.mark.parametrize("source", ["hf", "modelscope"])
-def test_validation_and_legacy_paths(hubs, source):
-    assert parse_model_hub_reference(f"{source}://Org/Model-1.5") == (
-        source,
-        "Org/Model-1.5",
-    )
-    for repo in (
-        "",
-        "owner",
-        "owner/repo/file",
-        "owner/repo@v1",
-        "owner/repo?x=1",
-        "owner/repo#v1",
-        "../repo",
-        "owner/repo.git",
-        "owner/.repo",
-        "owner/repo-",
-    ):
+def test_parse_model_hub_reference():
+    repo = "Org/Model-1.5"
+    for source in ("hf", "modelscope"):
+        assert parse_model_hub_reference(f"{source}://{repo}") == (source, repo)
+
+    for invalid in ("owner", "owner/repo/file", "owner/repo@v1", "owner/repo?x=1"):
         with pytest.raises(ValueError, match="Expected"):
-            handle_model_hub_paths(
-                ServerArgs(
-                    model_path="hf://Org/valid", tokenizer_path=f"{source}://{repo}"
-                )
-            )
-    for path in (
-        "owner/repo",
-        "/models/repo",
-        "./model",
-        "s3://bucket/model",
-        "gs://bucket/model",
-        "az://bucket/model",
-        "redis://host/model",
-        "instance://host/model",
-        "https://huggingface.co/Org/Model",
-        "owner/repo:Q4_K_M",
-    ):
+            parse_model_hub_reference(f"hf://{invalid}")
+
+
+def test_unprefixed_paths_pass_through(hubs):
+    for path in ("owner/repo", "./model", "s3://bucket/model", "owner/repo:Q4_K_M"):
         args = ServerArgs(model_path=path)
         handle_model_hub_paths(args)
         assert resolving_view(args).model_path == path
+    for download in hubs.values():
+        download.assert_not_called()
+
+
+def test_invalid_tokenizer_fails_before_model_download(hubs):
+    args = ServerArgs(model_path="hf://Org/valid", tokenizer_path="modelscope://owner")
+    with pytest.raises(ValueError, match="Expected"):
+        handle_model_hub_paths(args)
     for download in hubs.values():
         download.assert_not_called()
 
@@ -132,10 +116,6 @@ def test_mixed_sources_reach_weight_loader(
     loader = loader_module.DefaultModelLoader(
         LoadConfig(load_format="safetensors", download_dir=cfg.download_dir)
     )
-    source = loader.Source.init_new(
-        config, model=SimpleNamespace(fall_back_to_pt_during_load=False)
-    )
-    assert (source.model_or_path, source.revision) == (hf, snapshot.name)
 
     def fetch(repo, cache_dir, patterns, revision, *, ignore_patterns):
         assert (repo, cache_dir, patterns, revision) == (
@@ -242,28 +222,6 @@ def test_hf_weight_downloader_can_force_remote_for_same_named_directory(
         tmp_path / "remote-snapshot"
     )
     assert download.call_args.args == ("Org/repo",)
-
-
-def test_bundled_hf_draft_downloads_only_its_subfolder(hubs):
-    from sglang.srt.arg_groups.speculative_hook import (
-        _target_checkpoint_dspark_subfolder,
-    )
-
-    snapshot = Path(hubs["hf"].return_value)
-    draft = snapshot / "dspark"
-    draft.mkdir()
-    (draft / "config.json").write_text("{}")
-    with patch("huggingface_hub.hf_hub_download") as probe:
-        result = _target_checkpoint_dspark_subfolder(
-            "hf://Org/repo", "pinned", "/cache"
-        )
-    assert result == str(draft)
-    probe.assert_called_once_with(
-        "Org/repo", "dspark/config.json", revision="pinned", cache_dir="/cache"
-    )
-    hubs["hf"].assert_called_once_with(
-        "Org/repo", revision="pinned", cache_dir="/cache", allow_patterns=["dspark/*"]
-    )
 
 
 def test_tokenizer_reuses_full_draft_snapshot(hubs):

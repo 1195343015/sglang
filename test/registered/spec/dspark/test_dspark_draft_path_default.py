@@ -129,22 +129,27 @@ class TestTargetCheckpointDsparkSubfolderOnHub(CustomTestCase):
     """A Hub repo id resolves to the snapshot's dspark/ folder, fetching only it."""
 
     def test_repo_with_dspark_subfolder_downloads_only_that_folder(self):
-        with (
-            patch("huggingface_hub.hf_hub_download") as probe,
-            patch(
-                "huggingface_hub.snapshot_download", return_value="/hf/snap/abc"
-            ) as snapshot,
-        ):
-            draft_dir = _target_checkpoint_dspark_subfolder(
-                "org/model", revision="main", cache_dir="/dl"
-            )
-        self.assertEqual(draft_dir, "/hf/snap/abc/dspark")
-        probe.assert_called_once_with(
-            "org/model", "dspark/config.json", revision="main", cache_dir="/dl"
-        )
-        snapshot.assert_called_once_with(
-            "org/model", revision="main", cache_dir="/dl", allow_patterns=["dspark/*"]
-        )
+        for model_path in ("org/model", "hf://org/model"):
+            with (
+                self.subTest(model_path=model_path),
+                patch("huggingface_hub.hf_hub_download") as probe,
+                patch(
+                    "huggingface_hub.snapshot_download", return_value="/hf/snap/abc"
+                ) as snapshot,
+            ):
+                draft_dir = _target_checkpoint_dspark_subfolder(
+                    model_path, revision="main", cache_dir="/dl"
+                )
+                self.assertEqual(draft_dir, "/hf/snap/abc/dspark")
+                probe.assert_called_once_with(
+                    "org/model", "dspark/config.json", revision="main", cache_dir="/dl"
+                )
+                snapshot.assert_called_once_with(
+                    "org/model",
+                    revision="main",
+                    cache_dir="/dl",
+                    allow_patterns=["dspark/*"],
+                )
 
     def test_repo_without_dspark_subfolder_returns_none(self):
         from huggingface_hub.errors import EntryNotFoundError
