@@ -10,9 +10,8 @@ import pytest
 
 from sglang.srt.arg_groups.model_override_base import resolving_view
 from sglang.srt.arg_groups.model_path_hook import (
+    handle_model_hub_paths,
     handle_model_source_paths,
-    handle_modelscope_paths,
-    resolve_model_hub_paths,
 )
 from sglang.srt.server_args import ServerArgs
 from sglang.test.ci.ci_register import register_cpu_ci
@@ -59,7 +58,7 @@ def test_validation_and_legacy_paths(hubs, source):
         "owner/repo-",
     ):
         with pytest.raises(ValueError, match="Expected"):
-            resolve_model_hub_paths(
+            handle_model_hub_paths(
                 ServerArgs(
                     model_path="hf://Org/valid", tokenizer_path=f"{source}://{repo}"
                 )
@@ -76,7 +75,9 @@ def test_validation_and_legacy_paths(hubs, source):
         "https://huggingface.co/Org/Model",
         "owner/repo:Q4_K_M",
     ):
-        assert resolve_model_hub_paths(ServerArgs(model_path=path)) == {}
+        args = ServerArgs(model_path=path)
+        handle_model_hub_paths(args)
+        assert resolving_view(args).model_path == path
     for download in hubs.values():
         download.assert_not_called()
 
@@ -214,7 +215,7 @@ def test_legacy_modelscope_main_with_explicit_hf_draft(hubs, monkeypatch, tmp_pa
     )
     with patch("sglang.srt.arg_groups.model_path_hook.resolve_hf_gguf_model_path"):
         handle_model_source_paths(args)
-    handle_modelscope_paths(args)
+    handle_model_hub_paths(args, default_modelscope=True)
     view = resolving_view(args)
     assert view.model_path == hubs["modelscope"].return_value
     assert view.speculative_draft_model_path == hubs["hf"].return_value
@@ -264,6 +265,26 @@ def test_bundled_hf_draft_downloads_only_its_subfolder(hubs):
     )
 
 
+def test_tokenizer_reuses_full_draft_snapshot(hubs):
+    args = ServerArgs(
+        model_path="local",
+        speculative_draft_model_path="modelscope://Org/repo",
+        tokenizer_path="modelscope://Org/repo",
+        revision="v1",
+        speculative_draft_model_revision="v1",
+    )
+    handle_model_hub_paths(args)
+    cfg = resolving_view(args)
+    assert cfg.tokenizer_path == cfg.speculative_draft_model_path
+    hubs["modelscope"].assert_called_once_with(
+        "Org/repo",
+        cache_dir=None,
+        revision="v1",
+        local_files_only=True,
+        allow_patterns=None,
+    )
+
+
 def test_same_repo_different_tokenizer_revision(hubs):
     args = ServerArgs(
         model_path="local",
@@ -272,7 +293,7 @@ def test_same_repo_different_tokenizer_revision(hubs):
         revision="v1",
         speculative_draft_model_revision="v2",
     )
-    resolve_model_hub_paths(args)
+    handle_model_hub_paths(args)
     assert [call.kwargs["revision"] for call in hubs["hf"].call_args_list] == [
         "v2",
         "v1",
@@ -286,14 +307,14 @@ def test_cross_repo_auto_map_rejected(hubs, field):
         json.dumps({"auto_map": {"AutoTokenizer": ["Other/code--tok.Custom", None]}})
     )
     with pytest.raises(ValueError, match="cross-repository"):
-        resolve_model_hub_paths(
+        handle_model_hub_paths(
             ServerArgs(**{"model_path": "local", field: "hf://Org/repo"})
         )
 
 
 def test_unsupported_loader_fails_before_download(hubs):
     with pytest.raises(ValueError, match="local snapshot"):
-        resolve_model_hub_paths(
+        handle_model_hub_paths(
             ServerArgs(model_path="hf://Org/repo", load_format="gguf")
         )
     hubs["hf"].assert_not_called()
