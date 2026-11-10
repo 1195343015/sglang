@@ -55,9 +55,9 @@ Only repository roots are supported. Select versions with `--revision` or
 handles authentication and caching (`--download-dir`); failed downloads do not
 switch Hubs. ModelScope sources require the `modelscope` package.
 
-Models download a complete repository snapshot, then use the existing loader;
-repositories containing multiple weight formats may download extra files.
-Tokenizer-only and `dummy` loads fetch metadata only. Supported weight loaders
+Hugging Face weights use the existing loader's file selection. ModelScope model
+downloads follow its existing snapshot behavior. Tokenizer-only and `dummy`
+loads fetch metadata only. Supported weight loaders
 are `auto`, `safetensors`, `fastsafetensors`, `instanttensor`, `pt`, `npcache`, and
 `mistral`; use a local snapshot for other loaders.
 

@@ -5,10 +5,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
 from huggingface_hub.utils import HFValidationError, validate_repo_id
+
+from sglang.srt.environ import envs
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,22 @@ def parse_model_hub_reference(path: str | None) -> tuple[str, str] | None:
             "embedded revision; use the existing revision arguments."
         ) from exc
     return source, repo_id
+
+
+def download_hf_weights(
+    snapshot, repo_id, revision, cache_dir, patterns, ignore, download, subdir=""
+):
+    """Reuse the HF weight downloader while keeping the metadata snapshot pinned."""
+    path = Path(snapshot)
+    commit = path.name if path.parent.name == "snapshots" else revision
+    if subdir:
+        patterns = [f"{subdir}/{pattern}" for pattern in patterns]
+    folder = download(
+        repo_id, cache_dir, patterns, commit, ignore_patterns=ignore, force_remote=True
+    )
+    if os.path.realpath(folder) != os.path.realpath(snapshot):
+        raise ValueError("HF metadata and weight snapshots do not match")
+    return str(Path(folder) / subdir) if subdir else folder
 
 
 def _download_model(reference, revision, cfg, metadata_only):
@@ -123,12 +142,23 @@ def resolve_model_hub_paths(cfg: Any) -> dict[str, str]:
     for field, reference in references.items():
         if reference is None:
             continue
+        # The normal HF loader already selects the weight files to download.
+        # Preserve that path when the process default is HF.
+        if (
+            reference[0] == "hf"
+            and not envs.SGLANG_USE_MODELSCOPE.get()
+            and not os.path.exists(reference[1])
+        ):
+            resolved[field] = reference[1]
+            continue
         draft = field == "speculative_draft_model_path"
         revision = cfg.speculative_draft_model_revision if draft else cfg.revision
         key = (reference, revision, formats[field] == "dummy")
         if field == "tokenizer_path":
             key = next((k for k in snapshots if k[:2] == key[:2]), key)
         if key not in snapshots:
-            snapshots[key] = _download_model(reference, revision, cfg, key[2])
+            snapshots[key] = _download_model(
+                reference, revision, cfg, key[2] or reference[0] == "hf"
+            )
         resolved[field] = snapshots[key]
     return resolved

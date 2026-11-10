@@ -511,6 +511,9 @@ class DefaultModelLoader(BaseModelLoader):
         """Prepare weights for the model.
 
         If the model is not local, it will be downloaded."""
+        from sglang.srt.arg_groups.model_path_hook import explicit_hf_source
+
+        hf_source = explicit_hf_source(get_server_args(), model_name_or_path)
         model_name_or_path = self._maybe_download_from_modelscope(
             model_name_or_path, revision
         )
@@ -550,7 +553,23 @@ class DefaultModelLoader(BaseModelLoader):
         if allow_patterns_overrides is not None:
             allow_patterns = allow_patterns_overrides
 
-        if not is_local:
+        if hf_source and is_local:
+            # The early snapshot contains metadata only. Resolve weights with
+            # the usual HF loader, pinned to that snapshot's commit when known.
+            from sglang.srt.model_hub import download_hf_weights
+
+            repo_id, snapshot, subdir = hf_source
+            hf_folder = download_hf_weights(
+                snapshot,
+                repo_id,
+                revision,
+                self.load_config.download_dir,
+                allow_patterns,
+                self.load_config.ignore_patterns,
+                download_weights_from_hf,
+                subdir,
+            )
+        elif not is_local:
             hf_folder = download_weights_from_hf(
                 model_name_or_path,
                 self.load_config.download_dir,

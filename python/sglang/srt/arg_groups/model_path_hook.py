@@ -16,11 +16,30 @@ from sglang.srt.arg_groups.overrides import (
     run_post_process_pass,
 )
 from sglang.srt.hf_transformers import check_gguf_file
-from sglang.srt.model_hub import resolve_model_hub_paths
+from sglang.srt.model_hub import parse_model_hub_reference, resolve_model_hub_paths
 from sglang.srt.utils.common import find_local_repo_dir, is_remote_url
 from sglang.srt.utils.runai_utils import ObjectStorageModel, is_runai_obj_uri
 
 logger = logging.getLogger(__name__)
+
+
+def explicit_hf_source(server_args: Any, path: str):
+    """Find an explicit HF source behind a locally resolved model path."""
+    if server_args is None:
+        return None
+    cfg = resolving_view(server_args)
+    for field in ("model_path", "speculative_draft_model_path"):
+        reference = parse_model_hub_reference(getattr(server_args, field, None))
+        root = getattr(cfg, field, None)
+        if not reference or reference[0] != "hf" or not root:
+            continue
+        if root == path:
+            return reference[1], root, ""
+        if os.path.isdir(root) and os.path.isabs(path):
+            root_abs = os.path.abspath(root)
+            if os.path.commonpath((root_abs, os.path.abspath(path))) == root_abs:
+                return reference[1], root, os.path.relpath(path, root_abs)
+    return None
 
 
 def handle_model_source_paths(server_args: Any):
