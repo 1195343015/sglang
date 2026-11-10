@@ -38,7 +38,7 @@ from unittest import mock
 import sglang.srt.connector as connector_module
 from sglang.srt.arg_groups.model_override_base import resolving_view
 from sglang.srt.arg_groups.model_path_hook import (
-    handle_model_hub_paths,
+    handle_modelscope_paths,
     resolve_hf_gguf_model_path,
 )
 from sglang.srt.configs.model_config import ModelConfig
@@ -145,7 +145,7 @@ class TestTheGgufArm(_ModelSourceCase):
 
 
 class TestTheModelScopeArm(_ModelSourceCase):
-    """`handle_model_hub_paths` resolves repo ids against the local cache."""
+    """`handle_modelscope_paths` resolves repo ids against the local cache."""
 
     def _modelscope(self, cache_root: str, downloads: dict):
         """Stand in for the two modules the handler imports on a cache miss."""
@@ -175,7 +175,7 @@ class TestTheModelScopeArm(_ModelSourceCase):
         server_args = ServerArgs(model_path=local, tokenizer_path=local, device="cuda")
         imported = {name for name in sys.modules if name.startswith("modelscope")}
 
-        handle_model_hub_paths(server_args, default_modelscope=True)
+        handle_modelscope_paths(server_args)
 
         view = resolving_view(server_args)
         self.assertEqual(view.model_path, local)
@@ -192,7 +192,7 @@ class TestTheModelScopeArm(_ModelSourceCase):
             model_path=_MODELSCOPE_REPO, tokenizer_path=_MODELSCOPE_REPO, device="cuda"
         )
         with patch:
-            handle_model_hub_paths(server_args, default_modelscope=True)
+            handle_modelscope_paths(server_args)
 
         cached = os.path.join(cache_root, _MODELSCOPE_REPO)
         view = resolving_view(server_args)
@@ -208,7 +208,7 @@ class TestTheModelScopeArm(_ModelSourceCase):
             model_path=_MODELSCOPE_REPO, tokenizer_path=_MODELSCOPE_REPO, device="cuda"
         )
         with patch:
-            handle_model_hub_paths(server_args, default_modelscope=True)
+            handle_modelscope_paths(server_args)
 
         view = resolving_view(server_args)
         self.assertEqual(view.model_path, downloaded)
@@ -229,7 +229,7 @@ class TestTheModelScopeArm(_ModelSourceCase):
             device="cuda",
         )
         with patch:
-            handle_model_hub_paths(server_args, default_modelscope=True)
+            handle_modelscope_paths(server_args)
 
         self.assertEqual(
             resolving_view(server_args).model_path,
@@ -250,7 +250,7 @@ class TestTheModelScopeArm(_ModelSourceCase):
             device="cuda",
         )
         with patch:
-            handle_model_hub_paths(server_args, default_modelscope=True)
+            handle_modelscope_paths(server_args)
 
         self.assertEqual(
             resolving_view(server_args).speculative_draft_model_path, drafted

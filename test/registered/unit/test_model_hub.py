@@ -12,6 +12,7 @@ from sglang.srt.arg_groups.model_override_base import resolving_view
 from sglang.srt.arg_groups.model_path_hook import (
     handle_model_hub_paths,
     handle_model_source_paths,
+    handle_modelscope_paths,
 )
 from sglang.srt.server_args import ServerArgs
 from sglang.test.ci.ci_register import register_cpu_ci
@@ -215,7 +216,7 @@ def test_legacy_modelscope_main_with_explicit_hf_draft(hubs, monkeypatch, tmp_pa
     )
     with patch("sglang.srt.arg_groups.model_path_hook.resolve_hf_gguf_model_path"):
         handle_model_source_paths(args)
-    handle_model_hub_paths(args, default_modelscope=True)
+    handle_modelscope_paths(args)
     view = resolving_view(args)
     assert view.model_path == hubs["modelscope"].return_value
     assert view.speculative_draft_model_path == hubs["hf"].return_value
@@ -301,15 +302,15 @@ def test_same_repo_different_tokenizer_revision(hubs):
 
 
 @pytest.mark.parametrize("field", ["tokenizer_path", "model_path"])
-def test_cross_repo_auto_map_rejected(hubs, field):
+def test_hub_path_resolution_with_cross_repo_auto_map(hubs, field):
+    """Selecting a Hub must allow configs that reference code from another repo."""
     folder = Path(hubs["hf"].return_value)
     (folder / "tokenizer_config.json").write_text(
         json.dumps({"auto_map": {"AutoTokenizer": ["Other/code--tok.Custom", None]}})
     )
-    with pytest.raises(ValueError, match="cross-repository"):
-        handle_model_hub_paths(
-            ServerArgs(**{"model_path": "local", field: "hf://Org/repo"})
-        )
+    args = ServerArgs(**{"model_path": "local", field: "hf://Org/repo"})
+    handle_model_hub_paths(args)
+    assert getattr(resolving_view(args), field) == str(folder)
 
 
 def test_unsupported_loader_fails_before_download(hubs):

@@ -629,7 +629,7 @@ def handle_other_validations(server_args: Any):
 
 
 def handle_missing_default_values(server_args: Any):
-    from sglang.srt.arg_groups.model_path_hook import handle_model_hub_paths
+    from sglang.srt.arg_groups.model_path_hook import handle_modelscope_paths
 
     cfg = resolving_view(server_args)
     if cfg.tokenizer_path is None:
@@ -669,7 +669,7 @@ def handle_missing_default_values(server_args: Any):
 
     # Handle ModelScope model downloads
     if envs.SGLANG_USE_MODELSCOPE.get():
-        handle_model_hub_paths(server_args, default_modelscope=True)
+        handle_modelscope_paths(server_args)
 
     # In speculative scenario:
     # - If `speculative_draft_model_quantization` is specified, the draft model uses this quantization method.

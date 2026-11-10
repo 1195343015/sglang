@@ -5,11 +5,9 @@ from __future__ import annotations
 
 import glob
 import importlib
-import json
 import logging
 import os
-from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from sglang.srt.arg_groups.model_override_base import resolving_view
 from sglang.srt.arg_groups.overrides import (
@@ -49,82 +47,17 @@ _HUB_LOAD_FORMATS = {
 }
 
 
-def _resolve_or_download(
-    repo: str,
-    revision: str | None,
-    cache_dir: str | None,
-    *,
-    hub: str | None,
-    metadata_only: bool,
-) -> str:
-    """An unprefixed ModelScope ID can reuse the legacy on-disk cache layout."""
-    if hub is None:
-        if not repo or os.path.exists(repo):
-            return repo
-        from modelscope.utils.file_utils import get_model_cache_root
-
-        for root in (get_model_cache_root(), cache_dir):
-            if root and os.path.exists(os.path.join(root, repo)):
-                return os.path.join(root, repo)
-        options = (
-            {"ignore_patterns": ["*.bin", "*.safetensors"]} if metadata_only else {}
-        )
-    else:
-        from huggingface_hub.constants import HF_HUB_OFFLINE
-
-        options = dict(
-            local_files_only=HF_HUB_OFFLINE,
-            allow_patterns=_HUB_METADATA_PATTERNS if metadata_only else None,
-        )
-
-    if hub == "hf":
-        from huggingface_hub import snapshot_download
-    else:
-        from modelscope.hub.snapshot_download import snapshot_download
-    try:
-        folder = snapshot_download(
-            repo, revision=revision, cache_dir=cache_dir, **options
-        )
-    except Exception:
-        if hub is not None:
-            logger.error("Failed to resolve %s://%s", hub, repo)
-        raise
-    if hub is not None:
-        for path in Path(folder).rglob("*config*.json"):
-            try:
-                json.loads(path.read_text(), object_hook=_check_hub_auto_map)
-            except json.JSONDecodeError:
-                continue
-    return folder
-
-
-def handle_model_hub_paths(server_args: Any, *, default_modelscope: bool = False):
-    """Resolve prefixed paths before GGUF, or unprefixed IDs at the legacy ModelScope hook."""
+def handle_model_hub_paths(server_args: Any):
+    """Resolve explicitly prefixed Hub paths before GGUF and remote URL handling."""
     cfg = resolving_view(server_args)
     resolved = {}
     downloads = {}
-    # An explicit tokenizer can reuse the full target or draft snapshot. Keep
-    # the original resolution order for unprefixed ModelScope checkpoints.
-    fields = (
-        ("model_path", "tokenizer_path", "speculative_draft_model_path")
-        if default_modelscope
-        else ("model_path", "speculative_draft_model_path", "tokenizer_path")
-    )
-    for field in fields:
+    # Resolve the tokenizer last so it can reuse a full target or draft snapshot.
+    for field in ("model_path", "speculative_draft_model_path", "tokenizer_path"):
         path = getattr(cfg, field)
         draft = field == "speculative_draft_model_path"
         tokenizer = field == "tokenizer_path"
         revision = cfg.speculative_draft_model_revision if draft else cfg.revision
-        if default_modelscope:
-            if path is not None:
-                resolved[field] = _resolve_or_download(
-                    path,
-                    (revision or "main") if draft else revision,
-                    cfg.download_dir,
-                    hub=None,
-                    metadata_only=tokenizer,
-                )
-            continue
         ref = parse_model_hub_reference(path)
         if ref is None:
             continue
@@ -158,32 +91,29 @@ def handle_model_hub_paths(server_args: Any, *, default_modelscope: bool = False
             resolved[field] = snapshots[full]
             continue
         if key not in snapshots:
-            snapshots[key] = _resolve_or_download(
-                repo, revision, cfg.download_dir, hub=hub, metadata_only=metadata_only
-            )
+            from huggingface_hub.constants import HF_HUB_OFFLINE
+
+            if hub == "hf":
+                from huggingface_hub import snapshot_download
+            else:
+                from modelscope.hub.snapshot_download import snapshot_download
+
+            try:
+                snapshots[key] = snapshot_download(
+                    repo,
+                    revision=revision,
+                    cache_dir=cfg.download_dir,
+                    local_files_only=HF_HUB_OFFLINE,
+                    allow_patterns=_HUB_METADATA_PATTERNS if metadata_only else None,
+                )
+            except Exception:
+                logger.error("Failed to resolve %s://%s", hub, repo)
+                raise
         resolved[field] = snapshots[key]
-    if (
-        "model_path" in resolved
-        and cfg.tokenizer_path is None
-        and not default_modelscope
-    ):
+    if "model_path" in resolved and cfg.tokenizer_path is None:
         resolved["tokenizer_path"] = resolved["model_path"]
     if resolved:
-        declare_resolution(
-            server_args,
-            "_handle_modelscope_paths"
-            if default_modelscope
-            else "_handle_model_hub_paths",
-            **resolved,
-        )
-
-
-def _check_hub_auto_map(config):
-    if "--" in json.dumps(config.get("auto_map", {})):
-        raise ValueError(
-            "Explicit Hub sources do not support cross-repository auto_map"
-        )
-    return config
+        declare_resolution(server_args, "_handle_model_hub_paths", **resolved)
 
 
 def handle_model_source_paths(server_args: Any):
@@ -245,6 +175,84 @@ def resolve_hf_gguf_model_path(server_args: Any):
                 "_resolve_hf_gguf_model_path",
                 speculative_draft_model_path=resolved_draft,
             )
+
+
+def handle_modelscope_paths(server_args: Any):
+    """Resolve model / tokenizer / speculative-draft paths from the local
+    ModelScope cache when possible, falling back to snapshot_download
+    for any path that is not already present on disk.
+
+    Note: speculative_token_map is intentionally NOT handled here
+    because its value uses repo_id/filename semantics rather than a
+    plain repo ID.  That resolution lives in
+    :func:`sglang.srt.speculative.spec_utils.load_token_map`.
+    """
+    cfg = resolving_view(server_args)
+
+    ms_root = None
+    ms_snapshot_download = None
+
+    def _resolve_or_download(
+        path: Optional[str],
+        ignore_patterns: Optional[list] = None,
+        revision: Optional[str] = None,
+    ) -> Optional[str]:
+        nonlocal ms_root, ms_snapshot_download
+        if path is None:
+            return None
+        if not path or os.path.exists(path):
+            return path
+
+        if ms_snapshot_download is None:
+            from modelscope.hub.snapshot_download import (
+                snapshot_download as _ms_snapshot_download,
+            )
+            from modelscope.utils.file_utils import get_model_cache_root
+
+            ms_snapshot_download = _ms_snapshot_download
+            ms_root = get_model_cache_root()
+
+        # Check ModelScope default cache
+        cached = os.path.join(ms_root, path)
+        if os.path.exists(cached):
+            return cached
+        # Check user-specified download dir
+        if cfg.download_dir:
+            alt = os.path.join(cfg.download_dir, path)
+            if os.path.exists(alt):
+                return alt
+
+        # Cache miss — download from ModelScope hub
+        return ms_snapshot_download(
+            path,
+            cache_dir=cfg.download_dir,
+            revision=revision,
+            **({"ignore_patterns": ignore_patterns} if ignore_patterns else {}),
+        )
+
+    declare_resolution(
+        server_args,
+        "_handle_modelscope_paths",
+        model_path=_resolve_or_download(cfg.model_path, revision=cfg.revision),
+    )
+    declare_resolution(
+        server_args,
+        "_handle_modelscope_paths",
+        tokenizer_path=_resolve_or_download(
+            cfg.tokenizer_path,
+            ignore_patterns=["*.bin", "*.safetensors"],
+            revision=cfg.revision,
+        ),
+    )
+    if cfg.speculative_draft_model_path:
+        declare_resolution(
+            server_args,
+            "_handle_modelscope_paths",
+            speculative_draft_model_path=_resolve_or_download(
+                cfg.speculative_draft_model_path,
+                revision=cfg.speculative_draft_model_revision or "main",
+            ),
+        )
 
 
 def handle_load_format(server_args: Any):

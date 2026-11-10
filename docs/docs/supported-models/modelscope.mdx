@@ -61,8 +61,6 @@ loads fetch metadata only. Supported weight loaders
 are `auto`, `safetensors`, `fastsafetensors`, `instanttensor`, `pt`, `npcache`, and
 `mistral`; use a local snapshot for other loaders.
 
-Custom code within the same repository still uses `--trust-remote-code`.
-Cross-repository `auto_map` references are not supported with explicit prefixes;
-prepare the model and its code locally instead.
+Custom model code still requires `--trust-remote-code`.
 
 Unprefixed IDs, local paths, and existing remote-storage URLs are unchanged.
