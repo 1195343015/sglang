@@ -26,6 +26,27 @@ from sglang.srt.environ import envs
 logger = logging.getLogger(__name__)
 
 
+def parse_model_hub_reference(path: str | None) -> tuple[str, str] | None:
+    """Parse hf://owner/repo or modelscope://owner/repo, leaving other paths alone."""
+    if not isinstance(path, str) or not path:
+        return None
+    source, separator, repo_id = path.partition("://")
+    if not separator or source not in ("hf", "modelscope"):
+        return None
+    from huggingface_hub.utils import HFValidationError, validate_repo_id
+
+    try:
+        if repo_id.count("/") != 1:
+            raise HFValidationError("Expected owner/repo")
+        validate_repo_id(repo_id)
+    except HFValidationError as exc:
+        raise ValueError(
+            f"Expected {source}://owner/repo without a file path, query, or "
+            "embedded revision; use the existing revision arguments."
+        ) from exc
+    return source, repo_id
+
+
 def load_diffusion_overlay_registry_from_env() -> dict[str, dict[str, Any]]:
     raw_value = os.getenv("SGLANG_DIFFUSION_MODEL_OVERLAY_REGISTRY", "").strip()
     if not raw_value:

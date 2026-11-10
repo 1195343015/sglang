@@ -642,6 +642,7 @@ def _target_checkpoint_dspark_subfolder(
             return draft_dir
         return None
 
+    model_path = model_path.removeprefix("hf://")
     from huggingface_hub import hf_hub_download, snapshot_download
     from huggingface_hub.errors import (
         EntryNotFoundError,
@@ -743,7 +744,11 @@ def _handle_dspark(server_args: ServerArgs) -> None:
                 cfg.model_path,
             )
         elif draft_dir := _target_checkpoint_dspark_subfolder(
-            cfg.model_path, cfg.revision, cfg.download_dir
+            *(
+                getattr(model_config_of(server_args), "hf_weight_source", None)
+                or (cfg.model_path, cfg.revision)
+            ),
+            cache_dir=cfg.download_dir,
         ):
             declare_resolution(
                 server_args,

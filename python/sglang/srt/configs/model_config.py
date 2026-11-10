@@ -669,6 +669,8 @@ def get_num_indexer_layers(config) -> int:
 
 
 class ModelConfig:
+    hf_weight_source: tuple[str, Optional[str]] | None = None
+
     def __init__(
         self,
         model_path: str,
@@ -1073,7 +1075,7 @@ class ModelConfig:
             if is_draft_model
             else cfg.decrypted_config_file
         )
-        return ModelConfig(
+        config = ModelConfig(
             model_path=model_path or cfg.model_path,
             trust_remote_code=cfg.trust_remote_code,
             revision=model_revision or cfg.revision,
@@ -1105,6 +1107,28 @@ class ModelConfig:
             ).default_context_length(),
             **kwargs,
         )
+
+        # Metadata consumers use the local snapshot. Carry the operator's URI
+        # separately to the weight loader, including for an implicit shared draft.
+        if is_draft_model and server_args.speculative_draft_model_path is not None:
+            uri = server_args.speculative_draft_model_path
+            metadata = cfg.speculative_draft_model_path
+        else:
+            uri = server_args.model_path
+            metadata = cfg.model_path
+        if (
+            isinstance(uri, str)
+            and uri.startswith("hf://")
+            and config.model_path == metadata
+        ):
+            snapshot = Path(metadata)
+            revision = (
+                snapshot.name
+                if snapshot.parent.name == "snapshots" and snapshot.is_dir()
+                else getattr(config.hf_config, "_commit_hash", None) or config.revision
+            )
+            config.hf_weight_source = (uri, revision)
+        return config
 
     def _derive_multimodal_cuda_graph_support(self, enable_multimodal: bool) -> None:
         """Declare graph capabilities before deriving shapes and validating config.

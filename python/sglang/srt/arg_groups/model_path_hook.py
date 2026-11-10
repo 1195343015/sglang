@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import glob
 import importlib
+import json
 import logging
 import os
+from pathlib import Path
 from typing import Any, Optional
 
 from sglang.srt.arg_groups.model_override_base import resolving_view
@@ -15,31 +17,118 @@ from sglang.srt.arg_groups.overrides import (
     declare_resolution,
     run_post_process_pass,
 )
+from sglang.srt.environ import envs
 from sglang.srt.hf_transformers import check_gguf_file
-from sglang.srt.model_hub import parse_model_hub_reference, resolve_model_hub_paths
 from sglang.srt.utils.common import find_local_repo_dir, is_remote_url
 from sglang.srt.utils.runai_utils import ObjectStorageModel, is_runai_obj_uri
+from sglang.utils import parse_model_hub_reference
 
 logger = logging.getLogger(__name__)
 
 
-def explicit_hf_source(server_args: Any, path: str):
-    """Find an explicit HF source behind a locally resolved model path."""
-    if server_args is None:
-        return None
-    cfg = resolving_view(server_args)
-    for field in ("model_path", "speculative_draft_model_path"):
-        reference = parse_model_hub_reference(getattr(server_args, field, None))
-        root = getattr(cfg, field, None)
-        if not reference or reference[0] != "hf" or not root:
+def _download_hub_snapshot(ref, revision, cache_dir, metadata_only):
+    from huggingface_hub.constants import HF_HUB_OFFLINE
+
+    hub, repo = ref
+    if hub == "hf":
+        from huggingface_hub import snapshot_download
+    else:
+        from modelscope.hub.snapshot_download import snapshot_download
+
+    metadata = [
+        "*.json",
+        "*.py",
+        "*.model*",
+        "*.txt",
+        "*.tiktoken",
+        "*.jinja",
+        "*.bpe",
+        "*.vocab",
+        "*.spm",
+    ]
+    try:
+        folder = snapshot_download(
+            repo,
+            revision=revision,
+            cache_dir=cache_dir,
+            local_files_only=HF_HUB_OFFLINE,
+            allow_patterns=metadata if metadata_only else None,
+        )
+    except Exception:
+        logger.error("Failed to resolve %s://%s", hub, repo)
+        raise
+    for path in Path(folder).rglob("*config*.json"):
+        try:
+            json.loads(path.read_text(), object_hook=_check_hub_auto_map)
+        except json.JSONDecodeError:
             continue
-        if root == path:
-            return reference[1], root, ""
-        if os.path.isdir(root) and os.path.isabs(path):
-            root_abs = os.path.abspath(root)
-            if os.path.commonpath((root_abs, os.path.abspath(path))) == root_abs:
-                return reference[1], root, os.path.relpath(path, root_abs)
-    return None
+    return folder
+
+
+def resolve_model_hub_paths(cfg: Any) -> dict[str, str]:
+    """Resolve metadata paths while keeping the original URIs on ServerArgs."""
+    fields = ("model_path", "speculative_draft_model_path", "tokenizer_path")
+    requests = {}
+    resolved = {}
+    for field in fields:
+        ref = parse_model_hub_reference(getattr(cfg, field))
+        if ref is None:
+            continue
+        hub, repo = ref
+        draft = field == "speculative_draft_model_path"
+        revision = cfg.speculative_draft_model_revision if draft else cfg.revision
+        load_format = (
+            (cfg.speculative_draft_load_format if draft else None) or cfg.load_format
+        ).lower()
+        tokenizer = field == "tokenizer_path"
+        if not tokenizer and load_format not in (
+            "auto",
+            "safetensors",
+            "fastsafetensors",
+            "instanttensor",
+            "mistral",
+            "pt",
+            "npcache",
+            "dummy",
+        ):
+            raise ValueError(f"Use a local snapshot for load_format={load_format!r}")
+        if field == "model_path" and cfg.served_model_name is None:
+            resolved["served_model_name"] = repo
+        if (
+            hub == "hf"
+            and not envs.SGLANG_USE_MODELSCOPE.get()
+            and not os.path.exists(repo)
+        ):
+            resolved[field] = repo
+        else:
+            requests[field] = (
+                ref,
+                revision,
+                hub == "hf" or tokenizer or load_format == "dummy",
+            )
+
+    snapshots = {}
+    for field, key in requests.items():
+        ref, revision, metadata_only = key
+        # A previously downloaded full model includes its tokenizer.
+        if field == "tokenizer_path" and (ref, revision, False) in snapshots:
+            key = (ref, revision, False)
+        if key not in snapshots:
+            snapshots[key] = _download_hub_snapshot(
+                ref, revision, cfg.download_dir, metadata_only
+            )
+        resolved[field] = snapshots[key]
+    if "model_path" in resolved and cfg.tokenizer_path is None:
+        resolved["tokenizer_path"] = resolved["model_path"]
+    return resolved
+
+
+def _check_hub_auto_map(config):
+    if "--" in json.dumps(config.get("auto_map", {})):
+        raise ValueError(
+            "Explicit Hub sources do not support cross-repository auto_map"
+        )
+    return config
 
 
 def handle_model_source_paths(server_args: Any):

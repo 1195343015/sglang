@@ -7,10 +7,10 @@ from functools import lru_cache
 from huggingface_hub.errors import GatedRepoError
 
 from sglang.srt.environ import envs
-from sglang.srt.model_hub import parse_model_hub_reference
 from sglang.utils import (
     has_diffusion_overlay_registry_match,
     load_diffusion_overlay_registry_from_env,
+    parse_model_hub_reference,
 )
 
 logger = logging.getLogger(__name__)

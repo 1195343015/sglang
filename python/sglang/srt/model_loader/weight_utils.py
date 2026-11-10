@@ -626,7 +626,6 @@ def download_weights_from_hf(
     revision: Optional[str] = None,
     ignore_patterns: Optional[Union[str, List[str]]] = None,
     max_retries: int = 3,
-    force_remote: bool = False,
 ) -> str:
     """Download model weights from Hugging Face Hub.
 
@@ -643,14 +642,14 @@ def download_weights_from_hf(
             will be ignored.
         max_retries (int): Maximum number of download retries if corruption
             is detected. Defaults to 3.
-        force_remote (bool): Treat an explicit Hub ID as remote even if a
-            same-named local directory exists.
 
     Returns:
         str: The path to the downloaded model weights.
     """
-    # For local paths, no HF operations needed
-    if not force_remote and os.path.isdir(model_name_or_path):
+    # An explicit Hub ID takes precedence over a same-named local directory.
+    if isinstance(model_name_or_path, str) and model_name_or_path.startswith("hf://"):
+        model_name_or_path = model_name_or_path.removeprefix("hf://")
+    elif os.path.isdir(model_name_or_path):
         return model_name_or_path
 
     # Use a SINGLE lock for the entire operation (validation + cleanup + download)

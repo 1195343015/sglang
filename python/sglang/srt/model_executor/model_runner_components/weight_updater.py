@@ -212,6 +212,8 @@ class WeightUpdater:
         )
 
         target_device = torch.device(self.device)
+        if model_path != self.model_config.model_path:
+            self.model_config.hf_weight_source = None
         self.model_config.model_path = model_path
         # PP stages handle disk updates sequentially, unlike cold startup.
         load_config = LoadConfig(

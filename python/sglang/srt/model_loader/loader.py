@@ -445,9 +445,13 @@ class DefaultModelLoader(BaseModelLoader):
 
         @classmethod
         def init_new(cls, model_config: ModelConfig, model):
-            return cls(
+            path, revision = getattr(model_config, "hf_weight_source", None) or (
                 model_config.model_path,
                 model_config.revision,
+            )
+            return cls(
+                path,
+                revision,
                 prefix="",
                 fall_back_to_pt=getattr(model, "fall_back_to_pt_during_load", True),
                 allow_patterns_overrides=getattr(
@@ -511,14 +515,14 @@ class DefaultModelLoader(BaseModelLoader):
         """Prepare weights for the model.
 
         If the model is not local, it will be downloaded."""
-        from sglang.srt.arg_groups.model_path_hook import explicit_hf_source
-
-        hf_source = explicit_hf_source(get_server_args(), model_name_or_path)
-        model_name_or_path = self._maybe_download_from_modelscope(
-            model_name_or_path, revision
-        )
-
-        is_local = os.path.isdir(model_name_or_path)
+        explicit_hf = isinstance(
+            model_name_or_path, str
+        ) and model_name_or_path.startswith("hf://")
+        if not explicit_hf:
+            model_name_or_path = self._maybe_download_from_modelscope(
+                model_name_or_path, revision
+            )
+        is_local = not explicit_hf and os.path.isdir(model_name_or_path)
         load_format = self.load_config.load_format
         use_safetensors = False
         index_file = SAFE_WEIGHTS_INDEX_NAME
@@ -553,23 +557,7 @@ class DefaultModelLoader(BaseModelLoader):
         if allow_patterns_overrides is not None:
             allow_patterns = allow_patterns_overrides
 
-        if hf_source and is_local:
-            # The early snapshot contains metadata only. Resolve weights with
-            # the usual HF loader, pinned to that snapshot's commit when known.
-            from sglang.srt.model_hub import download_hf_weights
-
-            repo_id, snapshot, subdir = hf_source
-            hf_folder = download_hf_weights(
-                snapshot,
-                repo_id,
-                revision,
-                self.load_config.download_dir,
-                allow_patterns,
-                self.load_config.ignore_patterns,
-                download_weights_from_hf,
-                subdir,
-            )
-        elif not is_local:
+        if not is_local:
             hf_folder = download_weights_from_hf(
                 model_name_or_path,
                 self.load_config.download_dir,
@@ -603,7 +591,7 @@ class DefaultModelLoader(BaseModelLoader):
             # any files not found in the index.
             if not is_local:
                 download_safetensors_index_file_from_hf(
-                    model_name_or_path,
+                    model_name_or_path.removeprefix("hf://"),
                     index_file,
                     self.load_config.download_dir,
                     revision,
@@ -673,7 +661,13 @@ class DefaultModelLoader(BaseModelLoader):
             hf_folder = resolved_source.hf_folder
             hf_weights_files = list(resolved_source.weight_files)
             use_safetensors = resolved_source.use_safetensors
-        _checkpoint_files[(source.model_or_path, source.revision)] = (
+        key = (source.model_or_path, source.revision)
+        if (
+            source.model_config is not None
+            and getattr(source.model_config, "hf_weight_source", None) == key
+        ):
+            key = (source.model_config.model_path, source.model_config.revision)
+        _checkpoint_files[key] = (
             hf_folder,
             tuple(hf_weights_files),
         )
@@ -809,14 +803,25 @@ class DefaultModelLoader(BaseModelLoader):
         model: nn.Module,
     ) -> Generator[Tuple[str, torch.Tensor], None, None]:
 
-        primary_weights = DefaultModelLoader.Source.init_new(model_config, model)
-        yield from self._get_weights_iterator(primary_weights)
-
-        secondary_weights = cast(
-            Iterable[DefaultModelLoader.Source], getattr(model, "secondary_weights", ())
-        )
-        for source in secondary_weights:
+        for source in self._weight_sources(model_config, model):
             yield from self._get_weights_iterator(source)
+
+    @classmethod
+    def _weight_sources(cls, model_config: ModelConfig, model: nn.Module):
+        primary = cls.Source.init_new(model_config, model)
+        yield primary
+        for source in getattr(model, "secondary_weights", ()):
+            # A model can request several file patterns from the same checkpoint.
+            if getattr(model_config, "hf_weight_source", None) and (
+                source.model_or_path,
+                source.revision,
+            ) == (model_config.model_path, model_config.revision):
+                source = dataclasses.replace(
+                    source,
+                    model_or_path=primary.model_or_path,
+                    revision=primary.revision,
+                )
+            yield source
 
     def resolve_model_weights(
         self,
@@ -824,16 +829,8 @@ class DefaultModelLoader(BaseModelLoader):
         model: nn.Module,
     ) -> Tuple[ResolvedSource, ...]:
         """Resolve all checkpoint files before background startup prefetching."""
-        sources = [DefaultModelLoader.Source.init_new(model_config, model)]
-        sources.extend(
-            cast(
-                Iterable[DefaultModelLoader.Source],
-                getattr(model, "secondary_weights", ()),
-            )
-        )
-
         resolved_sources = []
-        for source in sources:
+        for source in self._weight_sources(model_config, model):
             hf_folder, weight_files, use_safetensors = self._prepare_weights(
                 source.model_or_path,
                 source.revision,
@@ -957,8 +954,9 @@ class DefaultModelLoader(BaseModelLoader):
         self.counter_after_loading_weights = time.perf_counter()
 
     def download_model(self, model_config: ModelConfig) -> None:
+        source = self.Source.init_new(model_config, model=None)
         self._prepare_weights(
-            model_config.model_path, model_config.revision, fall_back_to_pt=True
+            source.model_or_path, source.revision, fall_back_to_pt=True
         )
 
     def _load_modelopt_base_model(self, model_config: ModelConfig) -> nn.Module:
