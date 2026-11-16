@@ -10,9 +10,12 @@ not touch a device.
 """
 
 import unittest
+from unittest.mock import patch
 
 import torch
 
+from sglang.srt.layers.quantization.mxfp4 import Mxfp4Config
+from sglang.srt.models import deepseek_v4
 from sglang.srt.models.deepseek_v4 import _dequant_fp8_wo_a_streaming
 from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
@@ -76,6 +79,53 @@ class TestWoAStreamingScaleNames(CustomTestCase):
         entries = [("m.wo_a.weight_scale", fp32_scale())]
         with self.assertRaisesRegex(ValueError, "missing its weight"):
             self.run_stream(entries)
+
+    def test_only_configured_channelwise_layer_keeps_fp8_and_scale(self):
+        w, s = fp8_weight(), fp32_scale()
+        keep = "layers.0.attn.wo_a"
+        base = "layers.1.attn.wo_a"
+        entries = [
+            (keep + ".scale", s),
+            (base + ".weight", w),
+            (keep + ".weight", w),
+            (base + ".weight_scale", s),
+        ]
+        out = dict(
+            _dequant_fp8_wo_a_streaming(
+                iter(entries), keep_quantized=lambda prefix: prefix == keep
+            )
+        )
+        self.assertEqual(set(out), {keep + ".scale", keep + ".weight", base + ".weight"})
+        self.assertIs(out[keep + ".weight"], w)
+        self.assertIs(out[keep + ".scale"], s)
+        self.assertTrue(torch.equal(out[base + ".weight"], expected_bf16(w, s)))
+
+    def test_selected_layer_rejects_inconsistent_weight_dtype(self):
+        entries = [("m.wo_a.weight", torch.zeros(2, 2, dtype=torch.bfloat16))]
+        with self.assertRaisesRegex(ValueError, "expected per-channel FP8"):
+            list(_dequant_fp8_wo_a_streaming(entries, keep_quantized=lambda _: True))
+
+    def test_ppu_channelwise_gate_uses_checkpoint_list_and_existing_switch(self):
+        prefix = "model.layers.0.self_attn.wo_a"
+        config = Mxfp4Config(fp8_channelwise_layers=["layers.0.self_attn.wo_a"])
+        for sail, switch, layer, backend, expected in (
+            (True, True, prefix, "flashmla", True),
+            (True, True, prefix, "flashmla_mega", False),
+            (True, True, "model.layers.1.self_attn.wo_a", "flashmla", False),
+            (True, False, prefix, "flashmla", False),
+            (False, True, prefix, "flashmla", False),
+        ):
+            with (
+                self.subTest(sail=sail, switch=switch, layer=layer, backend=backend),
+                patch.object(deepseek_v4, "_is_sail", sail),
+                patch.object(deepseek_v4, "_FP8_WO_A_GEMM", switch),
+            ):
+                self.assertEqual(
+                    deepseek_v4._ppu_channelwise_wo_a_enabled(
+                        config, layer, attn_backend=backend
+                    ),
+                    expected,
+                )
 
 
 if __name__ == "__main__":
