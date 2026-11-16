@@ -26,7 +26,7 @@ from sglang.srt.runtime_context import get_parallel
 if TYPE_CHECKING:
     from sglang.srt.managers.schedule_batch import ScheduleBatch
 
-# Per engram layer: device fp8 rows, device e8m0 scales, and the event of their copy.
+# Per layer: payload rows, block E8M0 or per-row FP32 scales, and copy event.
 StagedRows = list[tuple[torch.Tensor, torch.Tensor, torch.cuda.Event]]
 
 _GATHER_THREADS = 16
@@ -40,9 +40,14 @@ class EngramRowStager:
         device: torch.device,
     ):
         self.hasher = hasher
-        # fp8 and e8m0 have no CPU index_select; the gather moves bytes.
+        # FP8 and E8M0 have no CPU index_select; gather bytes of the active format.
         self.tables = [
-            (e.weight.data.view(torch.uint8), e.scale.data.view(torch.uint8))
+            (
+                e.weight.data.view(torch.uint8),
+                (
+                    e._scale_f32.view(-1, 1) if e._per_channel_scale else e.scale.data
+                ).view(torch.uint8),
+            )
             for e in embeds
         ]
         self.device = device
