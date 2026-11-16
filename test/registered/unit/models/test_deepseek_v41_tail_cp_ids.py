@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import torch
 
+from sglang.srt.layers.attention import deepseek_v4_backend
 from sglang.srt.layers.attention.deepseek_v4_backend import (
     DeepseekV4AttnBackend,
     LateLayerTail,
@@ -24,6 +25,88 @@ from sglang.test.ci.ci_register import register_cpu_ci
 from sglang.test.test_utils import CustomTestCase
 
 register_cpu_ci(est_time=5, suite="base-a-test-cpu")
+
+
+class TestEagerTailRows(CustomTestCase):
+    def test_compacted_tail_bounds_and_restores_counts(self):
+        """An eager 128-row tail must not retain its full 129-row extent."""
+        for graph in (False, True):
+            with self.subTest(graph=graph):
+                global_count = torch.tensor(129, dtype=torch.int32)
+                local_count = torch.tensor(30, dtype=torch.int32)
+                batch = NS(
+                    attn_cp_metadata=None,
+                    global_num_token_non_padded_cpu=129,
+                    global_num_token_non_padded=global_count,
+                    num_token_non_padded=local_count,
+                )
+                backend = object.__new__(DeepseekV4AttnBackend)
+                backend.forward_metadata = object()
+                original_metadata = backend.forward_metadata
+                backend.tail_forward_metadata = NS(
+                    late_layer_tail=NS(
+                        real_rows_count=128 if graph else None,
+                        extend_seq_lens_cpu=[128],
+                        cp_metadata=None,
+                    ),
+                    core_attn_metadata=NS(),
+                )
+                backend._bcg_tail_num_token_non_padded = None
+                backend.token_to_kv_pool = NS(request_window=None)
+                with (
+                    patch.object(
+                        deepseek_v4_backend, "get_local_dp_buffer_len", return_value=132
+                    ),
+                    patch.object(deepseek_v4_backend, "set_local_dp_buffer_len"),
+                ):
+                    saved = backend.enter_late_layer_tail(batch)
+                    self.assertEqual(batch.global_num_token_non_padded_cpu, 128)
+                    self.assertEqual(batch.global_num_token_non_padded.item(), 128)
+                    self.assertEqual(batch.num_token_non_padded.item(), 128)
+                    backend.exit_late_layer_tail(saved, batch)
+                self.assertIs(backend.forward_metadata, original_metadata)
+                self.assertEqual(batch.global_num_token_non_padded_cpu, 129)
+                self.assertIs(batch.global_num_token_non_padded, global_count)
+                self.assertIs(batch.num_token_non_padded, local_count)
+
+    def test_contiguous_tail_ignores_mlp_sync_padding(self):
+        indices = torch.tensor([4, 5, 6])
+        rows = torch.arange(16).view(8, 2)
+        selected = deepseek_v4_backend._tail_rows(
+            rows, token_indices=indices, contiguous_start=4
+        )
+        torch.testing.assert_close(selected, rows[indices])
+        tail = NS(contiguous_start=4, scatter_indices=None)
+        result = deepseek_v4._scatter_tail_rows(tail, selected, 8)
+        torch.testing.assert_close(result[4:7], selected)
+
+    def test_eager_metadata_uses_real_rows_and_restores_batch(self):
+        batch = NS(
+            forward_mode=ForwardMode.EXTEND,
+            global_num_token_non_padded_cpu=129,
+            positions=torch.arange(132),
+            out_cache_loc=torch.arange(132),
+        )
+        positions, cache = batch.positions, batch.out_cache_loc
+        observed = []
+
+        def build(fb, *, real_num_tokens=None):
+            observed.append((len(fb.positions), len(fb.out_cache_loc), real_num_tokens))
+            return NS(real_num_tokens=real_num_tokens)
+
+        backend = NS(
+            mtp_enabled=False,
+            enable_decoder_swa_bounded_replay=True,
+            _build_forward_metadata=build,
+            init_forward_metadata_in_graph=lambda fb: None,
+            _build_late_layer_tail_metadata=lambda fb: len(fb.positions),
+            _activate_request_window=lambda: None,
+        )
+        DeepseekV4AttnBackend.init_forward_metadata(backend, batch)
+        self.assertEqual(observed, [(129, 129, 129)])
+        self.assertEqual(backend.tail_forward_metadata, 129)
+        self.assertIs(batch.positions, positions)
+        self.assertIs(batch.out_cache_loc, cache)
 
 
 class TestDSV41TailCPRoutingIDs(CustomTestCase):
