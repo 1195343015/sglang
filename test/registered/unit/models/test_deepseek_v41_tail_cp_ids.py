@@ -28,6 +28,35 @@ register_cpu_ci(est_time=5, suite="base-a-test-cpu")
 
 
 class TestEagerTailRows(CustomTestCase):
+    def test_tail_source_kv_keeps_shared_backend_contract(self):
+        for metadata in (NS(), NS(real_num_tokens=2)):
+            for num_rows in (0, 4):
+                with self.subTest(metadata=vars(metadata), num_rows=num_rows):
+                    x = torch.arange(num_rows * 2).view(num_rows, 2)
+                    positions = torch.arange(num_rows)
+                    batch, layer = NS(), NS(layer_id=7)
+                    calls = []
+                    backend = NS(
+                        forward_metadata=metadata,
+                        forward_low_ratio_sources=lambda **kwargs: calls.append(kwargs),
+                    )
+                    DeepseekV4AttnBackend.write_tail_source_kv(
+                        backend,
+                        layer=layer,
+                        x=x,
+                        positions=positions,
+                        forward_batch=batch,
+                    )
+                    self.assertEqual(backend.tail_source_kv_layer_id, layer.layer_id)
+                    self.assertEqual(len(calls), int(num_rows > 0))
+                    if calls:
+                        self.assertIs(calls[0]["x"], x)
+                        self.assertIs(calls[0]["positions"], positions)
+                        self.assertIs(calls[0]["forward_batch"], batch)
+                        self.assertIs(calls[0]["layer"], layer)
+                        self.assertIsNone(calls[0]["q_lora"])
+                        self.assertFalse(calls[0]["run_indexer"])
+
     def test_contiguous_tail_ignores_mlp_sync_padding(self):
         indices = torch.tensor([4, 5, 6])
         rows = torch.arange(16).view(8, 2)

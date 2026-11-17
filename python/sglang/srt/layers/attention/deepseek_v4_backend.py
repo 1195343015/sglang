@@ -2188,24 +2188,15 @@ class DeepseekV4AttnBackend(
         """Write every row's compressed KV for the source layer the tail starts at,
         before enter_late_layer_tail; the layer's own pass inside the tail then
         skips its compressor, also on a rank with no rows to write."""
-        real_num_tokens = self.forward_metadata.real_num_tokens
-        scope = (
-            real_rows_scope(forward_batch, real_num_tokens)
-            if real_num_tokens is not None
-            else nullcontext()
-        )
-        with scope:
-            if real_num_tokens is not None:
-                x, positions = x[:real_num_tokens], positions[:real_num_tokens]
-            if x.shape[0] > 0:
-                self.forward_low_ratio_sources(
-                    layer=layer,
-                    x=x,
-                    q_lora=None,
-                    positions=positions,
-                    forward_batch=forward_batch,
-                    run_indexer=False,
-                )
+        if x.shape[0] > 0:
+            self.forward_low_ratio_sources(
+                layer=layer,
+                x=x,
+                q_lora=None,
+                positions=positions,
+                forward_batch=forward_batch,
+                run_indexer=False,
+            )
         self.tail_source_kv_layer_id = layer.layer_id
 
     def enter_late_layer_tail(self, forward_batch: ForwardBatch) -> tuple:
