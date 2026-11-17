@@ -199,23 +199,36 @@ class TestEngramLoadRows(unittest.TestCase):
 
 class TestEngramStagedRows(CustomTestCase):
     def test_staged_rows_match_direct_lookup(self):
+        self._check_staged_rows(reload_formats=False)
+
+    def test_staged_rows_follow_format_reload(self):
+        self._check_staged_rows(reload_formats=True)
+
+    def _check_staged_rows(self, *, reload_formats):
         """Staging preserves scale format and payload signedness across mixed tables;
         padded rows must remain zero after dequantization.
         """
         ids = torch.tensor([3, 1, 3, 0, 2], dtype=torch.int64)
-        embeds = []
         formats = [(False, False), (False, True), (True, False), (True, True)]
-        for per_row, int8_payload in formats:
-            embed = _engram(4)
-            if per_row:
-                embed._load_rows(embed.scale, torch.tensor([0.25, 0.5, 1.5, 3.5]))
-            else:
-                exponents = torch.arange(32, dtype=torch.uint8).view(4, 8) % 4 + 125
-                embed._load_rows(embed.scale, exponents.view(torch.float8_e8m0fnu))
-            payload = torch.arange(4 * DIM).view(4, DIM) % 31 - 15
-            dtype = torch.int8 if int8_payload else torch.float8_e4m3fn
-            embed._load_rows(embed.weight, payload.to(dtype))
-            embeds.append(embed)
+        embeds = [_engram(4) for _ in formats]
+
+        def load_formats(active_formats, revision):
+            for embed, (per_row, int8_payload) in zip(embeds, active_formats):
+                if per_row:
+                    scales = torch.tensor([0.25, 0.5, 1.5, 3.5]) + revision
+                else:
+                    exponents = (
+                        torch.arange(32, dtype=torch.uint8).view(4, 8) % 4
+                        + 125
+                        + revision
+                    )
+                    scales = exponents.view(torch.float8_e8m0fnu)
+                embed._load_rows(embed.scale, scales)
+                payload = (torch.arange(4 * DIM).view(4, DIM) + revision) % 31 - 15
+                dtype = torch.int8 if int8_payload else torch.float8_e4m3fn
+                embed._load_rows(embed.weight, payload.to(dtype))
+
+        load_formats(formats, 0)
 
         buffers = {}
 
@@ -277,22 +290,65 @@ class TestEngramStagedRows(CustomTestCase):
         ):
             stager = EngramRowStager(hasher, embeds, torch.device("cpu"))
             try:
-                staged = stager.stage(batch)
-                for embed, (rows, scales, event), (per_row, int8_payload) in zip(
-                    embeds, staged, formats
-                ):
-                    with self.subTest(per_row=per_row, int8_payload=int8_payload):
-                        buffers[rows.data_ptr()] = rows
-                        buffers[scales.data_ptr()] = scales
-                        out = embed.dequant_staged(
-                            rows, scales, event, torch.Size([len(ids) + 2])
-                        )
-                        torch.testing.assert_close(
-                            out[: len(ids)], embed._owned_rows(ids), rtol=0, atol=0
-                        )
-                        self.assertEqual(out[len(ids) :].count_nonzero().item(), 0)
+                rounds = [formats]
+                if reload_formats:
+                    switched = [(not per_row, not int8) for per_row, int8 in formats]
+                    rounds += [switched, switched, formats]
+                for revision, active_formats in enumerate(rounds):
+                    if revision:
+                        load_formats(active_formats, revision)
+                    staged = stager.stage(batch)
+                    for embed, (rows, scales, event), (per_row, int8_payload) in zip(
+                        embeds, staged, active_formats
+                    ):
+                        with self.subTest(
+                            revision=revision,
+                            per_row=per_row,
+                            int8_payload=int8_payload,
+                        ):
+                            self.assertEqual(
+                                scales.shape, (len(ids), 4 if per_row else DIM // BLOCK)
+                            )
+                            buffers[rows.data_ptr()] = rows
+                            buffers[scales.data_ptr()] = scales
+                            out = embed.dequant_staged(
+                                rows, scales, event, torch.Size([len(ids) + 2])
+                            )
+                            torch.testing.assert_close(
+                                out[: len(ids)], embed._owned_rows(ids), rtol=0, atol=0
+                            )
+                            self.assertEqual(out[len(ids) :].count_nonzero().item(), 0)
             finally:
                 stager.pool.shutdown()
+
+    def test_staged_rows_reject_missing_fp32_scales(self):
+        embed = _engram(4)
+        embed._load_rows(embed.scale, torch.ones(4))
+        hasher = SimpleNamespace(
+            hash_windows=lambda *_: (torch.zeros(1, 1, 1, dtype=torch.int64), None)
+        )
+        batch = SimpleNamespace(
+            forward_mode=SimpleNamespace(is_extend_without_speculative=lambda: True)
+        )
+        with patch("torch.cuda.Stream"):
+            stager = EngramRowStager(hasher, [embed], torch.device("cpu"))
+        try:
+            embed._scale_f32 = None
+            with (
+                patch.object(stager, "_windows", return_value=(None, None)),
+                patch.object(
+                    stager,
+                    "_gather",
+                    side_effect=AssertionError(
+                        "invalid scales must be rejected before gathering"
+                    ),
+                ) as gather,
+            ):
+                with self.assertRaisesRegex(ValueError, "FP32 scale tensor"):
+                    stager.stage(batch)
+                gather.assert_not_called()
+        finally:
+            stager.pool.shutdown()
 
 
 if __name__ == "__main__":

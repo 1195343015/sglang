@@ -40,16 +40,7 @@ class EngramRowStager:
         device: torch.device,
     ):
         self.hasher = hasher
-        # FP8 and E8M0 have no CPU index_select; gather bytes of the active format.
-        self.tables = [
-            (
-                e.weight.data.view(torch.uint8),
-                (
-                    e._scale_f32.view(-1, 1) if e._per_channel_scale else e.scale.data
-                ).view(torch.uint8),
-            )
-            for e in embeds
-        ]
+        self.embeds = list(embeds)
         self.device = device
         self.pool = ThreadPoolExecutor(_GATHER_THREADS)
         # The schedule stream waits on the running forward (the WAR barrier), so
@@ -89,7 +80,20 @@ class EngramRowStager:
             return None
         ids, _ = self.hasher.hash_windows(*windows)
         staged = []
-        for layer, (weight, scale) in enumerate(self.tables):
+        for layer, embed in enumerate(self.embeds):
+            # Reloads can change the scale format without rebuilding this stager.
+            if embed._per_channel_scale:
+                scale = embed._scale_f32
+                if scale is None:
+                    raise ValueError(
+                        "per-row Engram scales require an FP32 scale tensor"
+                    )
+                scale = scale.view(-1, 1)
+            else:
+                scale = embed.scale.data
+            # FP8 and E8M0 have no CPU index_select; gather their bytes instead.
+            weight = embed.weight.data.view(torch.uint8)
+            scale = scale.view(torch.uint8)
             layer_ids = ids[:, layer].reshape(-1)
             rows = self._gather(weight, layer_ids)
             scales = self._gather(scale, layer_ids)
