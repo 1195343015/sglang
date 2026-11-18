@@ -138,7 +138,7 @@ def _engram_shared_host_gate_kernel(
     dot = tl.sum(xw * key, 0) * rstd * (D**-0.5)
     gate = tl.sigmoid(libdevice.copysign(tl.sqrt(tl.maximum(tl.abs(dot), CLAMP)), dot))
     value = tl.load(KV + token * (HC + 1) * D + HC * D + col, mask, 0).to(tl.float32)
-    tl.store(O + row * D + col, x + gate * value, mask)
+    tl.store(O + row * D + col, (x + gate * value).to(O.dtype.element_ty), mask)
 
 
 def fused_engram_shared_host_gate(

@@ -96,5 +96,83 @@ class TestEngramHostOptIn(CustomTestCase):
                 EngramEmbedding(4, 256, 0, (0, 4))
 
 
+@unittest.skipUnless(torch.cuda.is_available(), "requires a CUDA-compatible device")
+class TestEngramHostDeviceSafety(CustomTestCase):
+    def test_gate_final_cast_matches_original(self):
+        from sglang.kernels.ops.embeddings.engram_gate import fused_engram_gate
+        from sglang.srt.layers.engram_host import SharedHostEngram
+
+        torch.manual_seed(733427905)
+        for dtype in (torch.bfloat16, torch.float32):
+            for tokens in (1, 17, 128):
+                with self.subTest(dtype=dtype, tokens=tokens):
+                    x = torch.randn(tokens, 4, 4096, device="cuda", dtype=dtype)
+                    kv = torch.randn(tokens, 5 * 4096, device="cuda", dtype=dtype)
+                    q = torch.randn(4, 4096, device="cuda", dtype=dtype)
+                    k = torch.randn_like(q)
+                    actual = SharedHostEngram.gate(x, kv, q, k, 1e-6, 1e-6)
+                    expected = fused_engram_gate(x, kv, q, k, 1e-6, 1e-6)
+                    self.assertEqual(actual.dtype, dtype)
+                    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+
+    def prefetch_fixture(self):
+        from sglang.srt.layers.engram_host import SharedHostEngram
+
+        owner = torch.cuda.current_stream()
+        side = torch.cuda.Stream()
+        opt = SharedHostEngram()
+
+        def allocate(ids):
+            self.assertEqual(torch.cuda.current_stream(), owner)
+            return torch.empty((ids.numel(), 256), device=ids.device, dtype=torch.bfloat16)
+
+        def gather(embed, ids, out):
+            # Real asynchronous device work exercises the allocator independently
+            # of Host table setup and the gather kernel's numerical behavior.
+            out.copy_(ids[:, None].expand_as(out))
+
+        opt._gather = gather
+        return opt, SimpleNamespace(new_rows=allocate), owner, side
+
+    def test_prefetch_consume_survives_allocation_reuse(self):
+        opt, embed, owner, side = self.prefetch_fixture()
+        observed = []
+        for value in range(32):
+            ids = torch.full((512,), value, device="cuda", dtype=torch.int64)
+            side.wait_stream(owner)
+            opt.prefetch(embed, ids, side)
+            output = opt.lookup(embed, ids)
+            self.assertIsNone(opt._prefetched)
+            observed.append(output.clone())
+            del output, ids
+            # Exercise reuse on the output's allocation/consumer stream while
+            # the clone and prefetch can still be outstanding on the device.
+            scratch = torch.empty((512, 256), device="cuda", dtype=torch.bfloat16)
+            scratch.fill_(-1)
+            del scratch
+        torch.cuda.synchronize()
+        for value, actual in enumerate(observed):
+            torch.testing.assert_close(actual, torch.full_like(actual, value), rtol=0, atol=0)
+
+    def test_discarded_prefetch_preserves_live_allocations(self):
+        opt, embed, owner, side = self.prefetch_fixture()
+        live = []
+        for value in range(32):
+            ids = torch.full((512,), value, device="cuda", dtype=torch.int64)
+            side.wait_stream(owner)
+            opt.prefetch(embed, ids, side)
+            # Drop the result without waiting/consuming, as a discarded batch
+            # would do. record_stream must protect both ids and output storage.
+            opt._prefetched = None
+            del ids
+            replacement_ids = torch.full((512,), -7, device="cuda", dtype=torch.int64)
+            replacement_out = torch.full((512, 256), -3, device="cuda", dtype=torch.bfloat16)
+            live.append((replacement_ids, replacement_out))
+        torch.cuda.synchronize()
+        for ids, output in live:
+            torch.testing.assert_close(ids, torch.full_like(ids, -7), rtol=0, atol=0)
+            torch.testing.assert_close(output, torch.full_like(output, -3), rtol=0, atol=0)
+
+
 if __name__ == "__main__":
     unittest.main()

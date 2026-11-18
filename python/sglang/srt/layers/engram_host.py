@@ -104,6 +104,12 @@ class SharedHostEngram:
         ids: torch.Tensor,
         stream: torch.cuda.Stream,
     ) -> None:
+        # Keep the output owned by the caller/consumer stream. The caller must
+        # make the prefetch stream wait for that stream before calling us (see
+        # prefetch_engram_host_rows). record_stream below protects side-stream
+        # writes; lookup waits for completion before the owner stream consumes it.
+        # Moving allocation to the side stream would also require tracking the
+        # consumer stream's use before this storage could safely be recycled.
         out = embed.new_rows(ids)
         with torch.cuda.stream(stream):
             self._gather(embed, ids, out)
