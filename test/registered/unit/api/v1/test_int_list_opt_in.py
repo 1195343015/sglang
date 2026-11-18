@@ -65,6 +65,15 @@ class TestIntListOptIn(unittest.TestCase):
             with patch.object(msgspec, "convert", side_effect=AssertionError("fast path")):
                 self.assertEqual(api.decode_TokenIds(list(range(64))), list(range(64)))
 
+    def test_enabled_selection_survives_environment_change(self):
+        api = load_types("1")
+        with patch.dict(os.environ, {FLAG: "0"}):
+            with patch.object(msgspec, "convert", wraps=msgspec.convert) as convert:
+                for name in DECODERS:
+                    values = list(range(64))
+                    self.assertEqual(getattr(api, name)(values), values)
+                self.assertEqual(convert.call_count, len(DECODERS))
+
     def test_on_off_values_types_and_errors_match(self):
         off, on = load_types("0"), load_types("1")
 

@@ -753,9 +753,6 @@ fn emit_bare_list_codec(out: &mut String, m: &MessageModel, item: &FieldModel) {
         FieldKind::RepeatedMessage { rust_path } => format!("decode_{rust_path}(e)"),
         other => panic!("{name}: bare_list item must be repeated, got {other:?}"),
     };
-    out.push_str(&format!(
-        "def decode_{name}(value: Any) -> {name}:\n    return [{elem} for e in _expect_seq(value, expected=\"a sequence\")]\n\n\n"
-    ));
     let expected = match &item.kind {
         FieldKind::RepeatedScalar { ty: ScalarTy::I32 } => Some("i32"),
         FieldKind::RepeatedScalar { ty: ScalarTy::I64 } => Some("i64"),
@@ -763,7 +760,11 @@ fn emit_bare_list_codec(out: &mut String, m: &MessageModel, item: &FieldModel) {
     };
     if let Some(expected) = expected {
         out.push_str(&format!(
-            "if _OPT_API_INT_LIST:\n    def decode_{name}(value: Any) -> {name}:\n        return _expect_int_list(value, expected=\"{expected}\")\n\n\n"
+            "if _OPT_API_INT_LIST:\n    def decode_{name}(value: Any) -> {name}:\n        return _expect_int_list(value, expected=\"{expected}\")\nelse:\n    def decode_{name}(value: Any) -> {name}:\n        return [{elem} for e in _expect_seq(value, expected=\"a sequence\")]\n\n\n"
+        ));
+    } else {
+        out.push_str(&format!(
+            "def decode_{name}(value: Any) -> {name}:\n    return [{elem} for e in _expect_seq(value, expected=\"a sequence\")]\n\n\n"
         ));
     }
     out.push_str(&format!(
