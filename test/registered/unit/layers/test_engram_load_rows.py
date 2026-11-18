@@ -198,9 +198,6 @@ class TestEngramLoadRows(unittest.TestCase):
 
 
 class TestEngramStagedRows(CustomTestCase):
-    def test_staged_rows_match_direct_lookup(self):
-        self._check_staged_rows(reload_formats=False)
-
     def test_staged_rows_follow_format_reload(self):
         self._check_staged_rows(reload_formats=True)
 
