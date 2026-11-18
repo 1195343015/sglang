@@ -87,6 +87,20 @@ def _expect_int(v: Any, expected: str) -> int:
     raise _invalid_type(v, expected=expected)
 
 
+def _expect_int_list(v: Any, expected: str) -> List[int]:
+    values = _expect_seq(v, expected="a sequence")
+    if type(values) is list and len(values) >= 64:
+        try:
+            # Validate large token arrays in C, without coercing bool/float/str.
+            # Discard the converted copy to preserve Python int subclasses.
+            msgspec.convert(values, type=List[int], strict=True)
+        except msgspec.ValidationError:
+            pass  # Keep the schema's first-error text and accepted Python types.
+        else:
+            return list(values)
+    return [_expect_int(e, expected=expected) for e in values]
+
+
 def _expect_uint(v: Any, expected: str) -> int:
     if _is_int(v):
         if v < 0:
@@ -734,8 +748,17 @@ fn emit_bare_list_codec(out: &mut String, m: &MessageModel, item: &FieldModel) {
         FieldKind::RepeatedMessage { rust_path } => format!("decode_{rust_path}(e)"),
         other => panic!("{name}: bare_list item must be repeated, got {other:?}"),
     };
+    let decoded = match &item.kind {
+        FieldKind::RepeatedScalar { ty: ScalarTy::I32 } => {
+            "_expect_int_list(value, expected=\"i32\")".to_owned()
+        }
+        FieldKind::RepeatedScalar { ty: ScalarTy::I64 } => {
+            "_expect_int_list(value, expected=\"i64\")".to_owned()
+        }
+        _ => format!("[{elem} for e in _expect_seq(value, expected=\"a sequence\")]"),
+    };
     out.push_str(&format!(
-        "def decode_{name}(value: Any) -> {name}:\n    return [{elem} for e in _expect_seq(value, expected=\"a sequence\")]\n\n\n"
+        "def decode_{name}(value: Any) -> {name}:\n    return {decoded}\n\n\n"
     ));
     out.push_str(&format!(
         "def encode_{name}(v: {name}) -> List[Any]:\n    return {}\n\n\n",
