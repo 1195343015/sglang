@@ -34,6 +34,12 @@ class TestPpuMegaMhcCp(CustomTestCase):
         platform = SimpleNamespace(is_ppu=True, is_blackwell=False)
         forward = SimpleNamespace(sp_active=False)
         fused = Mock(return_value=("residual", "normalized", "stats"))
+        # This matrix covers the PPU BF16 dispatch only. Make a surprise entry
+        # into Blackwell or quantized dispatch fail with a diagnostic, rather
+        # than a missing global in the isolated production function.
+        def unexpected_branch(name):
+            return Mock(side_effect=AssertionError(f"unexpected PPU BF16 path: {name}"))
+
         scope = {
             "get_platform": lambda: platform,
             "get_forward": lambda: forward,
@@ -43,6 +49,10 @@ class TestPpuMegaMhcCp(CustomTestCase):
             "post": lambda *args: "fallback",
             "HcState": lambda *values: values,
             "HcNormed": lambda value: value,
+            "get_parallel": unexpected_branch("Blackwell configuration"),
+            "fused_mxfp8_rows": unexpected_branch("MXFP8 eligibility"),
+            "empty_deepgemm_mxfp8_pair": unexpected_branch("MXFP8 allocation"),
+            "HcQuantized": unexpected_branch("quantized handoff"),
         }
         exec(compile(tree, str(path), "exec"), scope)
 
