@@ -56,7 +56,14 @@ class TestCpProjectGather(CustomTestCase):
                             [3, 6], 2, True, False, ppu, compressor_on, indexer_on
                         )
 
-    def check_case(self, lengths, rank, scored, tail, ppu, compressor_on, indexer_on):
+    def test_fused_compressor_uses_global_request_lengths(self):
+        for tail in (False, True):
+            with self.subTest(tail=tail):
+                self.check_case([3, 6], 2, True, tail, True, True, True, fused=True)
+
+    def check_case(
+        self, lengths, rank, scored, tail, ppu, compressor_on, indexer_on, fused=False
+    ):
         total = sum(lengths)
         global_x = torch.arange(total * 8, dtype=torch.float64).reshape(total, 8) / 32
         req = torch.repeat_interleave(torch.arange(len(lengths)), torch.tensor(lengths))
@@ -82,13 +89,15 @@ class TestCpProjectGather(CustomTestCase):
         expected_packed = (
             torch.cat((expected_kv, expected_score), -1) if scored else expected_kv
         )
-        wanted = expected_packed if ppu else global_x
+        local_project = ppu and not fused
+        wanted = expected_packed if local_project else global_x
         slots, gather_indices = [0] * 4, []
         for owner in owners.tolist():
             gather_indices.append(owner * physical + slots[owner])
             slots[owner] += 1
         batch = NS(
             attn_cp_metadata=NS(
+                bs=len(lengths),
                 total_seq_lens=total,
                 per_rank_actual_token=[physical] * 4,
                 per_rank_logical_token=counts,
@@ -121,7 +130,7 @@ class TestCpProjectGather(CustomTestCase):
         calls = []
 
         def gather(value, fb, stream):
-            if ppu:
+            if local_project:
                 self.assertEqual(len(value), len(local))
             result = actual_gather(NS(cp_rank=rank, cp_size=4), value, fb)
             self.assertTrue(torch.equal(result, wanted))
@@ -129,7 +138,8 @@ class TestCpProjectGather(CustomTestCase):
             return result
 
         def consume(layer, value, requests, positions, projected=None):
-            self.assertEqual(projected is not None, ppu)
+            self.assertFalse(fused)
+            self.assertEqual(projected is not None, local_project)
             kv, score = project(value) if projected is None else projected
             self.assertTrue(torch.equal(kv, expected_kv))
             self.assertTrue(
@@ -143,6 +153,19 @@ class TestCpProjectGather(CustomTestCase):
             self.assertTrue(torch.equal(args[1], local))
             self.assertEqual(kwargs["rows_per_request"], local_lens)
             calls.append("indexer")
+
+        def offsets(global_lens, rows, bs, device):
+            self.assertTrue(fused)
+            self.assertEqual((global_lens, rows, bs), (list(lengths), total, len(lengths)))
+            return torch.tensor([0, lengths[0]]), torch.tensor(lengths)
+
+        def consume_fused(layer, value, requests, positions, *, extend_offsets):
+            self.assertTrue(fused)
+            self.assertTrue(torch.equal(value, global_x))
+            self.assertTrue(torch.equal(requests, req))
+            self.assertTrue(torch.equal(positions, pos))
+            self.assertEqual(extend_offsets[1].tolist(), list(lengths))
+            calls.append("compressor")
 
         fn = load_function(
             SOURCE / "layers/attention/deepseek_v4_backend.py",
@@ -159,7 +182,10 @@ class TestCpProjectGather(CustomTestCase):
         )
         metadata = NS(
             late_layer_tail=NS(
-                local_lens_cpu=local_lens, req_global=req, pos_global=pos
+                local_lens_cpu=local_lens,
+                extend_seq_lens_cpu=list(lengths),
+                req_global=req,
+                pos_global=pos,
             )
             if tail
             else None
@@ -167,9 +193,15 @@ class TestCpProjectGather(CustomTestCase):
         owner = NS(
             forward_metadata=metadata,
             _low_ratio_compress_torch=consume,
+            _low_ratio_cp_extend_offsets=offsets,
+            _low_ratio_compress_fused=consume_fused,
             _low_ratio_index_topk=indexer,
         )
-        layer = NS(compressor=NS(project=project), indexer=object())
+        layer = NS(
+            compress_ratio=1,
+            compressor=NS(project=project, use_fused_compress=fused),
+            indexer=object(),
+        )
         with patch.object(torch.cuda, "current_stream", return_value=None):
             fn(
                 owner,
