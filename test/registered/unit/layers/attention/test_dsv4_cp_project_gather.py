@@ -20,7 +20,7 @@ def load_function(path, name, namespace):
     # Run the actual methods without importing GPU-only backend dependencies.
     nodes = [
         n
-        for n in ast.walk(ast.parse(path.read_text()))
+        for n in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
         if isinstance(n, ast.FunctionDef) and n.name == name
     ]
     assert len(nodes) == 1
